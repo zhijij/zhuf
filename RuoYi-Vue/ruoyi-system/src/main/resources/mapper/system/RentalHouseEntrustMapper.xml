@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.RentalHouseEntrustMapper">
+    
+    <resultMap type="RentalHouseEntrust" id="RentalHouseEntrustResult">
+        <result property="entrustId"    column="entrust_id"    />
+        <result property="houseId"    column="house_id"    />
+        <result property="ownerId"    column="owner_id"    />
+        <result property="agentId"    column="agent_id"    />
+        <result property="entrustScope"    column="entrust_scope"    />
+        <result property="commissionRate"    column="commission_rate"    />
+        <result property="startDate"    column="start_date"    />
+        <result property="endDate"    column="end_date"    />
+        <result property="status"    column="status"    />
+        <result property="createTime"    column="create_time"    />
+        <result property="updateTime"    column="update_time"    />
+    </resultMap>
+
+    <sql id="selectRentalHouseEntrustVo">
+        select entrust_id, house_id, owner_id, agent_id, entrust_scope, commission_rate, start_date, end_date, status, create_time, update_time from rental_house_entrust
+    </sql>
+
+    <select id="selectRentalHouseEntrustList" parameterType="RentalHouseEntrust" resultMap="RentalHouseEntrustResult">
+        <include refid="selectRentalHouseEntrustVo"/>
+        <where>  
+            <if test="houseId != null "> and house_id = #{houseId}</if>
+            <if test="ownerId != null "> and owner_id = #{ownerId}</if>
+            <if test="agentId != null "> and agent_id = #{agentId}</if>
+            <if test="entrustScope != null  and entrustScope != ''"> and entrust_scope = #{entrustScope}</if>
+            <if test="commissionRate != null "> and commission_rate = #{commissionRate}</if>
+            <if test="startDate != null "> and start_date = #{startDate}</if>
+            <if test="endDate != null "> and end_date = #{endDate}</if>
+            <if test="status != null  and status != ''"> and status = #{status}</if>
+        </where>
+    </select>
+    
+    <select id="selectRentalHouseEntrustByEntrustId" parameterType="Long" resultMap="RentalHouseEntrustResult">
+        <include refid="selectRentalHouseEntrustVo"/>
+        where entrust_id = #{entrustId}
+    </select>
+
+    <insert id="insertRentalHouseEntrust" parameterType="RentalHouseEntrust" useGeneratedKeys="true" keyProperty="entrustId">
+        insert into rental_house_entrust
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="houseId != null">house_id,</if>
+            <if test="ownerId != null">owner_id,</if>
+            <if test="agentId != null">agent_id,</if>
+            <if test="entrustScope != null">entrust_scope,</if>
+            <if test="commissionRate != null">commission_rate,</if>
+            <if test="startDate != null">start_date,</if>
+            <if test="endDate != null">end_date,</if>
+            <if test="status != null">status,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateTime != null">update_time,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="houseId != null">#{houseId},</if>
+            <if test="ownerId != null">#{ownerId},</if>
+            <if test="agentId != null">#{agentId},</if>
+            <if test="entrustScope != null">#{entrustScope},</if>
+            <if test="commissionRate != null">#{commissionRate},</if>
+            <if test="startDate != null">#{startDate},</if>
+            <if test="endDate != null">#{endDate},</if>
+            <if test="status != null">#{status},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+         </trim>
+    </insert>
+
+    <update id="updateRentalHouseEntrust" parameterType="RentalHouseEntrust">
+        update rental_house_entrust
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="houseId != null">house_id = #{houseId},</if>
+            <if test="ownerId != null">owner_id = #{ownerId},</if>
+            <if test="agentId != null">agent_id = #{agentId},</if>
+            <if test="entrustScope != null">entrust_scope = #{entrustScope},</if>
+            <if test="commissionRate != null">commission_rate = #{commissionRate},</if>
+            <if test="startDate != null">start_date = #{startDate},</if>
+            <if test="endDate != null">end_date = #{endDate},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </trim>
+        where entrust_id = #{entrustId}
+    </update>
+
+    <delete id="deleteRentalHouseEntrustByEntrustId" parameterType="Long">
+        delete from rental_house_entrust where entrust_id = #{entrustId}
+    </delete>
+
+    <delete id="deleteRentalHouseEntrustByEntrustIds" parameterType="String">
+        delete from rental_house_entrust where entrust_id in 
+        <foreach item="entrustId" collection="array" open="(" separator="," close=")">
+            #{entrustId}
+        </foreach>
+    </delete>
+</mapper>

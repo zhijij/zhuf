@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.BizChatSessionUserMapper">
+
+    <resultMap type="BizChatSessionUser" id="BizChatSessionUserResult">
+        <result property="id" column="id" />
+        <result property="sessionId" column="session_id" />
+        <result property="userId" column="user_id" />
+        <result property="userRole" column="user_role" />
+        <result property="unreadCount" column="unread_count" />
+        <result property="lastReadMessageId" column="last_read_message_id" />
+        <result property="createTime" column="create_time" />
+        <result property="updateTime" column="update_time" />
+    </resultMap>
+
+    <select id="selectBizChatSessionUser" resultMap="BizChatSessionUserResult">
+        select id, session_id, user_id, user_role, unread_count, last_read_message_id, create_time, update_time
+        from biz_chat_session_user
+        where session_id = #{sessionId}
+          and user_id = #{userId}
+        limit 1
+    </select>
+
+    <select id="selectBizChatSessionUserList" parameterType="BizChatSessionUser" resultMap="BizChatSessionUserResult">
+        select id, session_id, user_id, user_role, unread_count, last_read_message_id, create_time, update_time
+        from biz_chat_session_user
+        <where>
+            <if test="sessionId != null">and session_id = #{sessionId}</if>
+            <if test="userId != null">and user_id = #{userId}</if>
+            <if test="userRole != null and userRole != ''">and user_role = #{userRole}</if>
+        </where>
+    </select>
+
+    <insert id="insertBizChatSessionUser" parameterType="BizChatSessionUser" useGeneratedKeys="true" keyProperty="id">
+        insert into biz_chat_session_user
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="sessionId != null">session_id,</if>
+            <if test="userId != null">user_id,</if>
+            <if test="userRole != null">user_role,</if>
+            <if test="unreadCount != null">unread_count,</if>
+            <if test="lastReadMessageId != null">last_read_message_id,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateTime != null">update_time,</if>
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="sessionId != null">#{sessionId},</if>
+            <if test="userId != null">#{userId},</if>
+            <if test="userRole != null">#{userRole},</if>
+            <if test="unreadCount != null">#{unreadCount},</if>
+            <if test="lastReadMessageId != null">#{lastReadMessageId},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+        </trim>
+    </insert>
+</mapper>

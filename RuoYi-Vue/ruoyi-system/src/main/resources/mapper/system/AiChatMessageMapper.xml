@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.AiChatMessageMapper">
+    
+    <resultMap type="AiChatMessage" id="AiChatMessageResult">
+        <result property="messageId"    column="message_id"    />
+        <result property="sessionId"    column="session_id"    />
+        <result property="userId"    column="user_id"    />
+        <result property="senderType"    column="sender_type"    />
+        <result property="content"    column="content"    />
+        <result property="toolName"    column="tool_name"    />
+        <result property="toolArgs"    column="tool_args"    />
+        <result property="toolResult"    column="tool_result"    />
+        <result property="tokenCount"    column="token_count"    />
+        <result property="createTime"    column="create_time"    />
+    </resultMap>
+
+    <sql id="selectAiChatMessageVo">
+        select message_id, session_id, user_id, sender_type, content, tool_name, tool_args, tool_result, token_count, create_time from ai_chat_message
+    </sql>
+
+    <select id="selectAiChatMessageList" parameterType="AiChatMessage" resultMap="AiChatMessageResult">
+        <include refid="selectAiChatMessageVo"/>
+        <where>  
+            <if test="sessionId != null "> and session_id = #{sessionId}</if>
+            <if test="userId != null "> and user_id = #{userId}</if>
+            <if test="senderType != null  and senderType != ''"> and sender_type = #{senderType}</if>
+            <if test="content != null  and content != ''"> and content = #{content}</if>
+            <if test="toolName != null  and toolName != ''"> and tool_name like concat('%', #{toolName}, '%')</if>
+            <if test="toolArgs != null  and toolArgs != ''"> and tool_args = #{toolArgs}</if>
+            <if test="toolResult != null  and toolResult != ''"> and tool_result = #{toolResult}</if>
+            <if test="tokenCount != null "> and token_count = #{tokenCount}</if>
+        </where>
+    </select>
+    
+    <select id="selectAiChatMessageByMessageId" parameterType="Long" resultMap="AiChatMessageResult">
+        <include refid="selectAiChatMessageVo"/>
+        where message_id = #{messageId}
+    </select>
+
+    <insert id="insertAiChatMessage" parameterType="AiChatMessage" useGeneratedKeys="true" keyProperty="messageId">
+        insert into ai_chat_message
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="sessionId != null">session_id,</if>
+            <if test="userId != null">user_id,</if>
+            <if test="senderType != null and senderType != ''">sender_type,</if>
+            <if test="content != null">content,</if>
+            <if test="toolName != null">tool_name,</if>
+            <if test="toolArgs != null">tool_args,</if>
+            <if test="toolResult != null">tool_result,</if>
+            <if test="tokenCount != null">token_count,</if>
+            <if test="createTime != null">create_time,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="sessionId != null">#{sessionId},</if>
+            <if test="userId != null">#{userId},</if>
+            <if test="senderType != null and senderType != ''">#{senderType},</if>
+            <if test="content != null">#{content},</if>
+            <if test="toolName != null">#{toolName},</if>
+            <if test="toolArgs != null">#{toolArgs},</if>
+            <if test="toolResult != null">#{toolResult},</if>
+            <if test="tokenCount != null">#{tokenCount},</if>
+            <if test="createTime != null">#{createTime},</if>
+         </trim>
+    </insert>
+
+    <update id="updateAiChatMessage" parameterType="AiChatMessage">
+        update ai_chat_message
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="sessionId != null">session_id = #{sessionId},</if>
+            <if test="userId != null">user_id = #{userId},</if>
+            <if test="senderType != null and senderType != ''">sender_type = #{senderType},</if>
+            <if test="content != null">content = #{content},</if>
+            <if test="toolName != null">tool_name = #{toolName},</if>
+            <if test="toolArgs != null">tool_args = #{toolArgs},</if>
+            <if test="toolResult != null">tool_result = #{toolResult},</if>
+            <if test="tokenCount != null">token_count = #{tokenCount},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+        </trim>
+        where message_id = #{messageId}
+    </update>
+
+    <delete id="deleteAiChatMessageByMessageId" parameterType="Long">
+        delete from ai_chat_message where message_id = #{messageId}
+    </delete>
+
+    <delete id="deleteAiChatMessageByMessageIds" parameterType="String">
+        delete from ai_chat_message where message_id in 
+        <foreach item="messageId" collection="array" open="(" separator="," close=")">
+            #{messageId}
+        </foreach>
+    </delete>
+</mapper>

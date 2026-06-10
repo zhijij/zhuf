@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.RentalTenantPreferenceMapper">
+    
+    <resultMap type="RentalTenantPreference" id="RentalTenantPreferenceResult">
+        <result property="preferenceId"    column="preference_id"    />
+        <result property="userId"    column="user_id"    />
+        <result property="city"    column="city"    />
+        <result property="districts"    column="districts"    />
+        <result property="minRent"    column="min_rent"    />
+        <result property="maxRent"    column="max_rent"    />
+        <result property="roomType"    column="room_type"    />
+        <result property="commuteTarget"    column="commute_target"    />
+        <result property="commuteMinutes"    column="commute_minutes"    />
+        <result property="requiredTags"    column="required_tags"    />
+        <result property="preferredTags"    column="preferred_tags"    />
+        <result property="avoidTags"    column="avoid_tags"    />
+        <result property="source"    column="source"    />
+        <result property="createTime"    column="create_time"    />
+        <result property="updateTime"    column="update_time"    />
+    </resultMap>
+
+    <sql id="selectRentalTenantPreferenceVo">
+        select preference_id, user_id, city, districts, min_rent, max_rent, room_type, commute_target, commute_minutes, required_tags, preferred_tags, avoid_tags, source, create_time, update_time from rental_tenant_preference
+    </sql>
+
+    <select id="selectRentalTenantPreferenceList" parameterType="RentalTenantPreference" resultMap="RentalTenantPreferenceResult">
+        <include refid="selectRentalTenantPreferenceVo"/>
+        <where>  
+            <if test="userId != null "> and user_id = #{userId}</if>
+            <if test="city != null  and city != ''"> and city = #{city}</if>
+            <if test="districts != null  and districts != ''"> and districts = #{districts}</if>
+            <if test="minRent != null "> and min_rent = #{minRent}</if>
+            <if test="maxRent != null "> and max_rent = #{maxRent}</if>
+            <if test="roomType != null  and roomType != ''"> and room_type = #{roomType}</if>
+            <if test="commuteTarget != null  and commuteTarget != ''"> and commute_target = #{commuteTarget}</if>
+            <if test="commuteMinutes != null "> and commute_minutes = #{commuteMinutes}</if>
+            <if test="requiredTags != null  and requiredTags != ''"> and required_tags = #{requiredTags}</if>
+            <if test="preferredTags != null  and preferredTags != ''"> and preferred_tags = #{preferredTags}</if>
+            <if test="avoidTags != null  and avoidTags != ''"> and avoid_tags = #{avoidTags}</if>
+            <if test="source != null  and source != ''"> and source = #{source}</if>
+        </where>
+    </select>
+    
+    <select id="selectRentalTenantPreferenceByPreferenceId" parameterType="Long" resultMap="RentalTenantPreferenceResult">
+        <include refid="selectRentalTenantPreferenceVo"/>
+        where preference_id = #{preferenceId}
+    </select>
+
+    <insert id="insertRentalTenantPreference" parameterType="RentalTenantPreference" useGeneratedKeys="true" keyProperty="preferenceId">
+        insert into rental_tenant_preference
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="userId != null">user_id,</if>
+            <if test="city != null">city,</if>
+            <if test="districts != null">districts,</if>
+            <if test="minRent != null">min_rent,</if>
+            <if test="maxRent != null">max_rent,</if>
+            <if test="roomType != null">room_type,</if>
+            <if test="commuteTarget != null">commute_target,</if>
+            <if test="commuteMinutes != null">commute_minutes,</if>
+            <if test="requiredTags != null">required_tags,</if>
+            <if test="preferredTags != null">preferred_tags,</if>
+            <if test="avoidTags != null">avoid_tags,</if>
+            <if test="source != null">source,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateTime != null">update_time,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="userId != null">#{userId},</if>
+            <if test="city != null">#{city},</if>
+            <if test="districts != null">#{districts},</if>
+            <if test="minRent != null">#{minRent},</if>
+            <if test="maxRent != null">#{maxRent},</if>
+            <if test="roomType != null">#{roomType},</if>
+            <if test="commuteTarget != null">#{commuteTarget},</if>
+            <if test="commuteMinutes != null">#{commuteMinutes},</if>
+            <if test="requiredTags != null">#{requiredTags},</if>
+            <if test="preferredTags != null">#{preferredTags},</if>
+            <if test="avoidTags != null">#{avoidTags},</if>
+            <if test="source != null">#{source},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+         </trim>
+    </insert>
+
+    <update id="updateRentalTenantPreference" parameterType="RentalTenantPreference">
+        update rental_tenant_preference
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="userId != null">user_id = #{userId},</if>
+            <if test="city != null">city = #{city},</if>
+            <if test="districts != null">districts = #{districts},</if>
+            <if test="minRent != null">min_rent = #{minRent},</if>
+            <if test="maxRent != null">max_rent = #{maxRent},</if>
+            <if test="roomType != null">room_type = #{roomType},</if>
+            <if test="commuteTarget != null">commute_target = #{commuteTarget},</if>
+            <if test="commuteMinutes != null">commute_minutes = #{commuteMinutes},</if>
+            <if test="requiredTags != null">required_tags = #{requiredTags},</if>
+            <if test="preferredTags != null">preferred_tags = #{preferredTags},</if>
+            <if test="avoidTags != null">avoid_tags = #{avoidTags},</if>
+            <if test="source != null">source = #{source},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </trim>
+        where preference_id = #{preferenceId}
+    </update>
+
+    <delete id="deleteRentalTenantPreferenceByPreferenceId" parameterType="Long">
+        delete from rental_tenant_preference where preference_id = #{preferenceId}
+    </delete>
+
+    <delete id="deleteRentalTenantPreferenceByPreferenceIds" parameterType="String">
+        delete from rental_tenant_preference where preference_id in 
+        <foreach item="preferenceId" collection="array" open="(" separator="," close=")">
+            #{preferenceId}
+        </foreach>
+    </delete>
+</mapper>

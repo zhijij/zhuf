@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.RentalHouseImageMapper">
+    
+    <resultMap type="RentalHouseImage" id="RentalHouseImageResult">
+        <result property="imageId"    column="image_id"    />
+        <result property="houseId"    column="house_id"    />
+        <result property="imageUrl"    column="image_url"    />
+        <result property="imageType"    column="image_type"    />
+        <result property="sortNo"    column="sort_no"    />
+        <result property="createTime"    column="create_time"    />
+    </resultMap>
+
+    <sql id="selectRentalHouseImageVo">
+        select image_id, house_id, image_url, image_type, sort_no, create_time from rental_house_image
+    </sql>
+
+    <select id="selectRentalHouseImageList" parameterType="RentalHouseImage" resultMap="RentalHouseImageResult">
+        <include refid="selectRentalHouseImageVo"/>
+        <where>  
+            <if test="houseId != null "> and house_id = #{houseId}</if>
+            <if test="imageUrl != null  and imageUrl != ''"> and image_url = #{imageUrl}</if>
+            <if test="imageType != null  and imageType != ''"> and image_type = #{imageType}</if>
+            <if test="sortNo != null "> and sort_no = #{sortNo}</if>
+        </where>
+    </select>
+    
+    <select id="selectRentalHouseImageByImageId" parameterType="Long" resultMap="RentalHouseImageResult">
+        <include refid="selectRentalHouseImageVo"/>
+        where image_id = #{imageId}
+    </select>
+
+    <insert id="insertRentalHouseImage" parameterType="RentalHouseImage" useGeneratedKeys="true" keyProperty="imageId">
+        insert into rental_house_image
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="houseId != null">house_id,</if>
+            <if test="imageUrl != null and imageUrl != ''">image_url,</if>
+            <if test="imageType != null">image_type,</if>
+            <if test="sortNo != null">sort_no,</if>
+            <if test="createTime != null">create_time,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="houseId != null">#{houseId},</if>
+            <if test="imageUrl != null and imageUrl != ''">#{imageUrl},</if>
+            <if test="imageType != null">#{imageType},</if>
+            <if test="sortNo != null">#{sortNo},</if>
+            <if test="createTime != null">#{createTime},</if>
+         </trim>
+    </insert>
+
+    <update id="updateRentalHouseImage" parameterType="RentalHouseImage">
+        update rental_house_image
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="houseId != null">house_id = #{houseId},</if>
+            <if test="imageUrl != null and imageUrl != ''">image_url = #{imageUrl},</if>
+            <if test="imageType != null">image_type = #{imageType},</if>
+            <if test="sortNo != null">sort_no = #{sortNo},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+        </trim>
+        where image_id = #{imageId}
+    </update>
+
+    <delete id="deleteRentalHouseImageByImageId" parameterType="Long">
+        delete from rental_house_image where image_id = #{imageId}
+    </delete>
+
+    <delete id="deleteRentalHouseImageByImageIds" parameterType="String">
+        delete from rental_house_image where image_id in 
+        <foreach item="imageId" collection="array" open="(" separator="," close=")">
+            #{imageId}
+        </foreach>
+    </delete>
+</mapper>

@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.AiKnowledgeChunkMapper">
+    
+    <resultMap type="AiKnowledgeChunk" id="AiKnowledgeChunkResult">
+        <result property="chunkId"    column="chunk_id"    />
+        <result property="docId"    column="doc_id"    />
+        <result property="chunkNo"    column="chunk_no"    />
+        <result property="content"    column="content"    />
+        <result property="tokenCount"    column="token_count"    />
+        <result property="vectorStatus"    column="vector_status"    />
+        <result property="createTime"    column="create_time"    />
+    </resultMap>
+
+    <sql id="selectAiKnowledgeChunkVo">
+        select chunk_id, doc_id, chunk_no, content, token_count, vector_status, create_time from ai_knowledge_chunk
+    </sql>
+
+    <select id="selectAiKnowledgeChunkList" parameterType="AiKnowledgeChunk" resultMap="AiKnowledgeChunkResult">
+        <include refid="selectAiKnowledgeChunkVo"/>
+        <where>  
+            <if test="docId != null "> and doc_id = #{docId}</if>
+            <if test="chunkNo != null "> and chunk_no = #{chunkNo}</if>
+            <if test="content != null  and content != ''"> and content = #{content}</if>
+            <if test="tokenCount != null "> and token_count = #{tokenCount}</if>
+            <if test="vectorStatus != null  and vectorStatus != ''"> and vector_status = #{vectorStatus}</if>
+        </where>
+    </select>
+    
+    <select id="selectAiKnowledgeChunkByChunkId" parameterType="Long" resultMap="AiKnowledgeChunkResult">
+        <include refid="selectAiKnowledgeChunkVo"/>
+        where chunk_id = #{chunkId}
+    </select>
+
+    <insert id="insertAiKnowledgeChunk" parameterType="AiKnowledgeChunk" useGeneratedKeys="true" keyProperty="chunkId">
+        insert into ai_knowledge_chunk
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="docId != null">doc_id,</if>
+            <if test="chunkNo != null">chunk_no,</if>
+            <if test="content != null and content != ''">content,</if>
+            <if test="tokenCount != null">token_count,</if>
+            <if test="vectorStatus != null">vector_status,</if>
+            <if test="createTime != null">create_time,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="docId != null">#{docId},</if>
+            <if test="chunkNo != null">#{chunkNo},</if>
+            <if test="content != null and content != ''">#{content},</if>
+            <if test="tokenCount != null">#{tokenCount},</if>
+            <if test="vectorStatus != null">#{vectorStatus},</if>
+            <if test="createTime != null">#{createTime},</if>
+         </trim>
+    </insert>
+
+    <update id="updateAiKnowledgeChunk" parameterType="AiKnowledgeChunk">
+        update ai_knowledge_chunk
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="docId != null">doc_id = #{docId},</if>
+            <if test="chunkNo != null">chunk_no = #{chunkNo},</if>
+            <if test="content != null and content != ''">content = #{content},</if>
+            <if test="tokenCount != null">token_count = #{tokenCount},</if>
+            <if test="vectorStatus != null">vector_status = #{vectorStatus},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+        </trim>
+        where chunk_id = #{chunkId}
+    </update>
+
+    <delete id="deleteAiKnowledgeChunkByChunkId" parameterType="Long">
+        delete from ai_knowledge_chunk where chunk_id = #{chunkId}
+    </delete>
+
+    <delete id="deleteAiKnowledgeChunkByChunkIds" parameterType="String">
+        delete from ai_knowledge_chunk where chunk_id in 
+        <foreach item="chunkId" collection="array" open="(" separator="," close=")">
+            #{chunkId}
+        </foreach>
+    </delete>
+</mapper>

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.BizChatSessionMapper">
+
+    <resultMap type="BizChatSession" id="BizChatSessionResult">
+        <result property="sessionId" column="session_id" />
+        <result property="bizType" column="biz_type" />
+        <result property="bizId" column="biz_id" />
+        <result property="title" column="title" />
+        <result property="status" column="status" />
+        <result property="lastMessage" column="last_message" />
+        <result property="lastMessageTime" column="last_message_time" />
+        <result property="createTime" column="create_time" />
+        <result property="updateTime" column="update_time" />
+    </resultMap>
+
+    <sql id="selectBizChatSessionVo">
+        select session_id, biz_type, biz_id, title, status, last_message, last_message_time, create_time, update_time
+        from biz_chat_session
+    </sql>
+
+    <select id="selectBizChatSessionBySessionId" parameterType="Long" resultMap="BizChatSessionResult">
+        <include refid="selectBizChatSessionVo"/>
+        where session_id = #{sessionId}
+    </select>
+
+    <select id="selectBizChatSessionByBiz" resultMap="BizChatSessionResult">
+        <include refid="selectBizChatSessionVo"/>
+        where biz_type = #{bizType}
+          and biz_id = #{bizId}
+        limit 1
+    </select>
+
+    <select id="selectBizChatSessionList" parameterType="BizChatSession" resultMap="BizChatSessionResult">
+        <include refid="selectBizChatSessionVo"/>
+        <where>
+            <if test="bizType != null and bizType != ''">and biz_type = #{bizType}</if>
+            <if test="bizId != null">and biz_id = #{bizId}</if>
+            <if test="status != null and status != ''">and status = #{status}</if>
+        </where>
+        order by coalesce(last_message_time, create_time) desc, session_id desc
+    </select>
+
+    <select id="selectBizChatSessionListByUserId" parameterType="Long" resultMap="BizChatSessionResult">
+        select s.session_id, s.biz_type, s.biz_id, s.title, s.status, s.last_message,
+               s.last_message_time, s.create_time, s.update_time
+        from biz_chat_session s
+        inner join biz_chat_session_user su on su.session_id = s.session_id
+        where su.user_id = #{userId}
+          and s.status = '0'
+        order by coalesce(s.last_message_time, s.create_time) desc, s.session_id desc
+    </select>
+
+    <insert id="insertBizChatSession" parameterType="BizChatSession" useGeneratedKeys="true" keyProperty="sessionId">
+        insert into biz_chat_session
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="bizType != null and bizType != ''">biz_type,</if>
+            <if test="bizId != null">biz_id,</if>
+            <if test="title != null">title,</if>
+            <if test="status != null">status,</if>
+            <if test="lastMessage != null">last_message,</if>
+            <if test="lastMessageTime != null">last_message_time,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateTime != null">update_time,</if>
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="bizType != null and bizType != ''">#{bizType},</if>
+            <if test="bizId != null">#{bizId},</if>
+            <if test="title != null">#{title},</if>
+            <if test="status != null">#{status},</if>
+            <if test="lastMessage != null">#{lastMessage},</if>
+            <if test="lastMessageTime != null">#{lastMessageTime},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+        </trim>
+    </insert>
+
+    <update id="updateBizChatSession" parameterType="BizChatSession">
+        update biz_chat_session
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="title != null">title = #{title},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="lastMessage != null">last_message = #{lastMessage},</if>
+            <if test="lastMessageTime != null">last_message_time = #{lastMessageTime},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </trim>
+        where session_id = #{sessionId}
+    </update>
+</mapper>

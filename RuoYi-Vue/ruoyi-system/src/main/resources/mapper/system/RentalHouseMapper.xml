@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.RentalHouseMapper">
+    
+    <resultMap type="RentalHouse" id="RentalHouseResult">
+        <result property="houseId"    column="house_id"    />
+        <result property="ownerId"    column="owner_id"    />
+        <result property="agentId"    column="agent_id"    />
+        <result property="operationMode"    column="operation_mode"    />
+        <result property="title"    column="title"    />
+        <result property="city"    column="city"    />
+        <result property="district"    column="district"    />
+        <result property="street"    column="street"    />
+        <result property="community"    column="community"    />
+        <result property="address"    column="address"    />
+        <result property="longitude"    column="longitude"    />
+        <result property="latitude"    column="latitude"    />
+        <result property="rentAmount"    column="rent_amount"    />
+        <result property="depositAmount"    column="deposit_amount"    />
+        <result property="area"    column="area"    />
+        <result property="roomCount"    column="room_count"    />
+        <result property="hallCount"    column="hall_count"    />
+        <result property="toiletCount"    column="toilet_count"    />
+        <result property="floorNo"    column="floor_no"    />
+        <result property="totalFloor"    column="total_floor"    />
+        <result property="orientation"    column="orientation"    />
+        <result property="rentType"    column="rent_type"    />
+        <result property="decoration"    column="decoration"    />
+        <result property="facilities"    column="facilities"    />
+        <result property="tags"    column="tags"    />
+        <result property="description"    column="description"    />
+        <result property="status"    column="status"    />
+        <result property="auditStatus"    column="audit_status"    />
+        <result property="auditReason"    column="audit_reason"    />
+        <result property="viewCount"    column="view_count"    />
+        <result property="favoriteCount"    column="favorite_count"    />
+        <result property="aiIndexStatus"    column="ai_index_status"    />
+        <result property="delFlag"    column="del_flag"    />
+        <result property="createBy"    column="create_by"    />
+        <result property="createTime"    column="create_time"    />
+        <result property="updateBy"    column="update_by"    />
+        <result property="updateTime"    column="update_time"    />
+        <result property="remark"    column="remark"    />
+    </resultMap>
+
+    <sql id="selectRentalHouseVo">
+        select house_id, owner_id, agent_id, operation_mode, title, city, district, street, community, address, longitude, latitude, rent_amount, deposit_amount, area, room_count, hall_count, toilet_count, floor_no, total_floor, orientation, rent_type, decoration, facilities, tags, description, status, audit_status, audit_reason, view_count, favorite_count, ai_index_status, del_flag, create_by, create_time, update_by, update_time, remark from rental_house
+    </sql>
+
+    <select id="selectRentalHouseList" parameterType="RentalHouse" resultMap="RentalHouseResult">
+        <include refid="selectRentalHouseVo"/>
+        <where>  
+            <if test="ownerId != null "> and owner_id = #{ownerId}</if>
+            <if test="agentId != null "> and agent_id = #{agentId}</if>
+            <if test="operationMode != null  and operationMode != ''"> and operation_mode = #{operationMode}</if>
+            <if test="title != null  and title != ''"> and title = #{title}</if>
+            <if test="city != null  and city != ''"> and city = #{city}</if>
+            <if test="district != null  and district != ''"> and district = #{district}</if>
+            <if test="street != null  and street != ''"> and street = #{street}</if>
+            <if test="community != null  and community != ''"> and community = #{community}</if>
+            <if test="address != null  and address != ''"> and address = #{address}</if>
+            <if test="longitude != null "> and longitude = #{longitude}</if>
+            <if test="latitude != null "> and latitude = #{latitude}</if>
+            <if test="rentAmount != null "> and rent_amount = #{rentAmount}</if>
+            <if test="depositAmount != null "> and deposit_amount = #{depositAmount}</if>
+            <if test="area != null "> and area = #{area}</if>
+            <if test="roomCount != null "> and room_count = #{roomCount}</if>
+            <if test="hallCount != null "> and hall_count = #{hallCount}</if>
+            <if test="toiletCount != null "> and toilet_count = #{toiletCount}</if>
+            <if test="floorNo != null "> and floor_no = #{floorNo}</if>
+            <if test="totalFloor != null "> and total_floor = #{totalFloor}</if>
+            <if test="orientation != null  and orientation != ''"> and orientation = #{orientation}</if>
+            <if test="rentType != null  and rentType != ''"> and rent_type = #{rentType}</if>
+            <if test="decoration != null  and decoration != ''"> and decoration = #{decoration}</if>
+            <if test="facilities != null  and facilities != ''"> and facilities = #{facilities}</if>
+            <if test="tags != null  and tags != ''"> and tags = #{tags}</if>
+            <if test="description != null  and description != ''"> and description = #{description}</if>
+            <if test="status != null  and status != ''"> and status = #{status}</if>
+            <if test="auditStatus != null  and auditStatus != ''"> and audit_status = #{auditStatus}</if>
+            <if test="auditReason != null  and auditReason != ''"> and audit_reason = #{auditReason}</if>
+            <if test="viewCount != null "> and view_count = #{viewCount}</if>
+            <if test="favoriteCount != null "> and favorite_count = #{favoriteCount}</if>
+            <if test="aiIndexStatus != null  and aiIndexStatus != ''"> and ai_index_status = #{aiIndexStatus}</if>
+        </where>
+    </select>
+    
+    <select id="selectRentalHouseByHouseId" parameterType="Long" resultMap="RentalHouseResult">
+        <include refid="selectRentalHouseVo"/>
+        where house_id = #{houseId}
+    </select>
+
+    <insert id="insertRentalHouse" parameterType="RentalHouse" useGeneratedKeys="true" keyProperty="houseId">
+        insert into rental_house
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="ownerId != null">owner_id,</if>
+            <if test="agentId != null">agent_id,</if>
+            <if test="operationMode != null">operation_mode,</if>
+            <if test="title != null and title != ''">title,</if>
+            <if test="city != null and city != ''">city,</if>
+            <if test="district != null and district != ''">district,</if>
+            <if test="street != null">street,</if>
+            <if test="community != null">community,</if>
+            <if test="address != null">address,</if>
+            <if test="longitude != null">longitude,</if>
+            <if test="latitude != null">latitude,</if>
+            <if test="rentAmount != null">rent_amount,</if>
+            <if test="depositAmount != null">deposit_amount,</if>
+            <if test="area != null">area,</if>
+            <if test="roomCount != null">room_count,</if>
+            <if test="hallCount != null">hall_count,</if>
+            <if test="toiletCount != null">toilet_count,</if>
+            <if test="floorNo != null">floor_no,</if>
+            <if test="totalFloor != null">total_floor,</if>
+            <if test="orientation != null">orientation,</if>
+            <if test="rentType != null">rent_type,</if>
+            <if test="decoration != null">decoration,</if>
+            <if test="facilities != null">facilities,</if>
+            <if test="tags != null">tags,</if>
+            <if test="description != null">description,</if>
+            <if test="status != null and status != ''">status,</if>
+            <if test="auditStatus != null">audit_status,</if>
+            <if test="auditReason != null">audit_reason,</if>
+            <if test="viewCount != null">view_count,</if>
+            <if test="favoriteCount != null">favorite_count,</if>
+            <if test="aiIndexStatus != null">ai_index_status,</if>
+            <if test="delFlag != null">del_flag,</if>
+            <if test="createBy != null">create_by,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateBy != null">update_by,</if>
+            <if test="updateTime != null">update_time,</if>
+            <if test="remark != null">remark,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="ownerId != null">#{ownerId},</if>
+            <if test="agentId != null">#{agentId},</if>
+            <if test="operationMode != null">#{operationMode},</if>
+            <if test="title != null and title != ''">#{title},</if>
+            <if test="city != null and city != ''">#{city},</if>
+            <if test="district != null and district != ''">#{district},</if>
+            <if test="street != null">#{street},</if>
+            <if test="community != null">#{community},</if>
+            <if test="address != null">#{address},</if>
+            <if test="longitude != null">#{longitude},</if>
+            <if test="latitude != null">#{latitude},</if>
+            <if test="rentAmount != null">#{rentAmount},</if>
+            <if test="depositAmount != null">#{depositAmount},</if>
+            <if test="area != null">#{area},</if>
+            <if test="roomCount != null">#{roomCount},</if>
+            <if test="hallCount != null">#{hallCount},</if>
+            <if test="toiletCount != null">#{toiletCount},</if>
+            <if test="floorNo != null">#{floorNo},</if>
+            <if test="totalFloor != null">#{totalFloor},</if>
+            <if test="orientation != null">#{orientation},</if>
+            <if test="rentType != null">#{rentType},</if>
+            <if test="decoration != null">#{decoration},</if>
+            <if test="facilities != null">#{facilities},</if>
+            <if test="tags != null">#{tags},</if>
+            <if test="description != null">#{description},</if>
+            <if test="status != null and status != ''">#{status},</if>
+            <if test="auditStatus != null">#{auditStatus},</if>
+            <if test="auditReason != null">#{auditReason},</if>
+            <if test="viewCount != null">#{viewCount},</if>
+            <if test="favoriteCount != null">#{favoriteCount},</if>
+            <if test="aiIndexStatus != null">#{aiIndexStatus},</if>
+            <if test="delFlag != null">#{delFlag},</if>
+            <if test="createBy != null">#{createBy},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateBy != null">#{updateBy},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+            <if test="remark != null">#{remark},</if>
+         </trim>
+    </insert>
+
+    <update id="updateRentalHouse" parameterType="RentalHouse">
+        update rental_house
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="ownerId != null">owner_id = #{ownerId},</if>
+            <if test="agentId != null">agent_id = #{agentId},</if>
+            <if test="operationMode != null">operation_mode = #{operationMode},</if>
+            <if test="title != null and title != ''">title = #{title},</if>
+            <if test="city != null and city != ''">city = #{city},</if>
+            <if test="district != null and district != ''">district = #{district},</if>
+            <if test="street != null">street = #{street},</if>
+            <if test="community != null">community = #{community},</if>
+            <if test="address != null">address = #{address},</if>
+            <if test="longitude != null">longitude = #{longitude},</if>
+            <if test="latitude != null">latitude = #{latitude},</if>
+            <if test="rentAmount != null">rent_amount = #{rentAmount},</if>
+            <if test="depositAmount != null">deposit_amount = #{depositAmount},</if>
+            <if test="area != null">area = #{area},</if>
+            <if test="roomCount != null">room_count = #{roomCount},</if>
+            <if test="hallCount != null">hall_count = #{hallCount},</if>
+            <if test="toiletCount != null">toilet_count = #{toiletCount},</if>
+            <if test="floorNo != null">floor_no = #{floorNo},</if>
+            <if test="totalFloor != null">total_floor = #{totalFloor},</if>
+            <if test="orientation != null">orientation = #{orientation},</if>
+            <if test="rentType != null">rent_type = #{rentType},</if>
+            <if test="decoration != null">decoration = #{decoration},</if>
+            <if test="facilities != null">facilities = #{facilities},</if>
+            <if test="tags != null">tags = #{tags},</if>
+            <if test="description != null">description = #{description},</if>
+            <if test="status != null and status != ''">status = #{status},</if>
+            <if test="auditStatus != null">audit_status = #{auditStatus},</if>
+            <if test="auditReason != null">audit_reason = #{auditReason},</if>
+            <if test="viewCount != null">view_count = #{viewCount},</if>
+            <if test="favoriteCount != null">favorite_count = #{favoriteCount},</if>
+            <if test="aiIndexStatus != null">ai_index_status = #{aiIndexStatus},</if>
+            <if test="delFlag != null">del_flag = #{delFlag},</if>
+            <if test="createBy != null">create_by = #{createBy},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+            <if test="remark != null">remark = #{remark},</if>
+        </trim>
+        where house_id = #{houseId}
+    </update>
+
+    <delete id="deleteRentalHouseByHouseId" parameterType="Long">
+        delete from rental_house where house_id = #{houseId}
+    </delete>
+
+    <delete id="deleteRentalHouseByHouseIds" parameterType="String">
+        delete from rental_house where house_id in 
+        <foreach item="houseId" collection="array" open="(" separator="," close=")">
+            #{houseId}
+        </foreach>
+    </delete>
+</mapper>

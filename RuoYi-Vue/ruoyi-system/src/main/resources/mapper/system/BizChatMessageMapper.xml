@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.BizChatMessageMapper">
+
+    <resultMap type="BizChatMessage" id="BizChatMessageResult">
+        <result property="messageId" column="message_id" />
+        <result property="sessionId" column="session_id" />
+        <result property="senderId" column="sender_id" />
+        <result property="messageType" column="message_type" />
+        <result property="content" column="content" />
+        <result property="createTime" column="create_time" />
+    </resultMap>
+
+    <select id="selectBizChatMessageByMessageId" parameterType="Long" resultMap="BizChatMessageResult">
+        select message_id, session_id, sender_id, message_type, content, create_time
+        from biz_chat_message
+        where message_id = #{messageId}
+    </select>
+
+    <select id="selectBizChatMessageList" parameterType="BizChatMessage" resultMap="BizChatMessageResult">
+        select message_id, session_id, sender_id, message_type, content, create_time
+        from biz_chat_message
+        <where>
+            <if test="sessionId != null">and session_id = #{sessionId}</if>
+            <if test="senderId != null">and sender_id = #{senderId}</if>
+            <if test="messageType != null and messageType != ''">and message_type = #{messageType}</if>
+        </where>
+        order by message_id asc
+    </select>
+
+    <insert id="insertBizChatMessage" parameterType="BizChatMessage" useGeneratedKeys="true" keyProperty="messageId">
+        insert into biz_chat_message
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="sessionId != null">session_id,</if>
+            <if test="senderId != null">sender_id,</if>
+            <if test="messageType != null">message_type,</if>
+            <if test="content != null">content,</if>
+            <if test="createTime != null">create_time,</if>
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="sessionId != null">#{sessionId},</if>
+            <if test="senderId != null">#{senderId},</if>
+            <if test="messageType != null">#{messageType},</if>
+            <if test="content != null">#{content},</if>
+            <if test="createTime != null">#{createTime},</if>
+        </trim>
+    </insert>
+</mapper>

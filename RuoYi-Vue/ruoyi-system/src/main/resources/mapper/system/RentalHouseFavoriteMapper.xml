@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.RentalHouseFavoriteMapper">
+    
+    <resultMap type="RentalHouseFavorite" id="RentalHouseFavoriteResult">
+        <result property="favoriteId"    column="favorite_id"    />
+        <result property="userId"    column="user_id"    />
+        <result property="houseId"    column="house_id"    />
+        <result property="createTime"    column="create_time"    />
+    </resultMap>
+
+    <sql id="selectRentalHouseFavoriteVo">
+        select favorite_id, user_id, house_id, create_time from rental_house_favorite
+    </sql>
+
+    <select id="selectRentalHouseFavoriteList" parameterType="RentalHouseFavorite" resultMap="RentalHouseFavoriteResult">
+        <include refid="selectRentalHouseFavoriteVo"/>
+        <where>  
+            <if test="userId != null "> and user_id = #{userId}</if>
+            <if test="houseId != null "> and house_id = #{houseId}</if>
+        </where>
+    </select>
+    
+    <select id="selectRentalHouseFavoriteByFavoriteId" parameterType="Long" resultMap="RentalHouseFavoriteResult">
+        <include refid="selectRentalHouseFavoriteVo"/>
+        where favorite_id = #{favoriteId}
+    </select>
+
+    <insert id="insertRentalHouseFavorite" parameterType="RentalHouseFavorite" useGeneratedKeys="true" keyProperty="favoriteId">
+        insert into rental_house_favorite
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="userId != null">user_id,</if>
+            <if test="houseId != null">house_id,</if>
+            <if test="createTime != null">create_time,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="userId != null">#{userId},</if>
+            <if test="houseId != null">#{houseId},</if>
+            <if test="createTime != null">#{createTime},</if>
+         </trim>
+    </insert>
+
+    <update id="updateRentalHouseFavorite" parameterType="RentalHouseFavorite">
+        update rental_house_favorite
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="userId != null">user_id = #{userId},</if>
+            <if test="houseId != null">house_id = #{houseId},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+        </trim>
+        where favorite_id = #{favoriteId}
+    </update>
+
+    <delete id="deleteRentalHouseFavoriteByFavoriteId" parameterType="Long">
+        delete from rental_house_favorite where favorite_id = #{favoriteId}
+    </delete>
+
+    <delete id="deleteRentalHouseFavoriteByFavoriteIds" parameterType="String">
+        delete from rental_house_favorite where favorite_id in 
+        <foreach item="favoriteId" collection="array" open="(" separator="," close=")">
+            #{favoriteId}
+        </foreach>
+    </delete>
+</mapper>

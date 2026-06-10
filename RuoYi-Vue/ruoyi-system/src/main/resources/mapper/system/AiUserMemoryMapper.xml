@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.AiUserMemoryMapper">
+    
+    <resultMap type="AiUserMemory" id="AiUserMemoryResult">
+        <result property="memoryId"    column="memory_id"    />
+        <result property="userId"    column="user_id"    />
+        <result property="role"    column="role"    />
+        <result property="memoryType"    column="memory_type"    />
+        <result property="content"    column="content"    />
+        <result property="importance"    column="importance"    />
+        <result property="vectorStatus"    column="vector_status"    />
+        <result property="expiresAt"    column="expires_at"    />
+        <result property="createTime"    column="create_time"    />
+        <result property="updateTime"    column="update_time"    />
+    </resultMap>
+
+    <sql id="selectAiUserMemoryVo">
+        select memory_id, user_id, role, memory_type, content, importance, vector_status, expires_at, create_time, update_time from ai_user_memory
+    </sql>
+
+    <select id="selectAiUserMemoryList" parameterType="AiUserMemory" resultMap="AiUserMemoryResult">
+        <include refid="selectAiUserMemoryVo"/>
+        <where>  
+            <if test="userId != null "> and user_id = #{userId}</if>
+            <if test="role != null  and role != ''"> and role = #{role}</if>
+            <if test="memoryType != null  and memoryType != ''"> and memory_type = #{memoryType}</if>
+            <if test="content != null  and content != ''"> and content = #{content}</if>
+            <if test="importance != null "> and importance = #{importance}</if>
+            <if test="vectorStatus != null  and vectorStatus != ''"> and vector_status = #{vectorStatus}</if>
+            <if test="expiresAt != null "> and expires_at = #{expiresAt}</if>
+        </where>
+    </select>
+    
+    <select id="selectAiUserMemoryByMemoryId" parameterType="Long" resultMap="AiUserMemoryResult">
+        <include refid="selectAiUserMemoryVo"/>
+        where memory_id = #{memoryId}
+    </select>
+
+    <insert id="insertAiUserMemory" parameterType="AiUserMemory" useGeneratedKeys="true" keyProperty="memoryId">
+        insert into ai_user_memory
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="userId != null">user_id,</if>
+            <if test="role != null and role != ''">role,</if>
+            <if test="memoryType != null and memoryType != ''">memory_type,</if>
+            <if test="content != null and content != ''">content,</if>
+            <if test="importance != null">importance,</if>
+            <if test="vectorStatus != null">vector_status,</if>
+            <if test="expiresAt != null">expires_at,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateTime != null">update_time,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="userId != null">#{userId},</if>
+            <if test="role != null and role != ''">#{role},</if>
+            <if test="memoryType != null and memoryType != ''">#{memoryType},</if>
+            <if test="content != null and content != ''">#{content},</if>
+            <if test="importance != null">#{importance},</if>
+            <if test="vectorStatus != null">#{vectorStatus},</if>
+            <if test="expiresAt != null">#{expiresAt},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+         </trim>
+    </insert>
+
+    <update id="updateAiUserMemory" parameterType="AiUserMemory">
+        update ai_user_memory
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="userId != null">user_id = #{userId},</if>
+            <if test="role != null and role != ''">role = #{role},</if>
+            <if test="memoryType != null and memoryType != ''">memory_type = #{memoryType},</if>
+            <if test="content != null and content != ''">content = #{content},</if>
+            <if test="importance != null">importance = #{importance},</if>
+            <if test="vectorStatus != null">vector_status = #{vectorStatus},</if>
+            <if test="expiresAt != null">expires_at = #{expiresAt},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </trim>
+        where memory_id = #{memoryId}
+    </update>
+
+    <delete id="deleteAiUserMemoryByMemoryId" parameterType="Long">
+        delete from ai_user_memory where memory_id = #{memoryId}
+    </delete>
+
+    <delete id="deleteAiUserMemoryByMemoryIds" parameterType="String">
+        delete from ai_user_memory where memory_id in 
+        <foreach item="memoryId" collection="array" open="(" separator="," close=")">
+            #{memoryId}
+        </foreach>
+    </delete>
+</mapper>

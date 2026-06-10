@@ -101,6 +101,10 @@ token:
   # 令牌有效期（默认30分钟）
   expireTime: 30
 
+ai:
+  service:
+    base-url: http://127.0.0.1:8000
+
 # MyBatis配置
 mybatis:
   # 搜索指定包别名

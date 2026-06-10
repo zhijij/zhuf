@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.RentalAppointmentMapper">
+    
+    <resultMap type="RentalAppointment" id="RentalAppointmentResult">
+        <result property="appointmentId"    column="appointment_id"    />
+        <result property="houseId"    column="house_id"    />
+        <result property="tenantId"    column="tenant_id"    />
+        <result property="ownerId"    column="owner_id"    />
+        <result property="agentId"    column="agent_id"    />
+        <result property="appointmentTime"    column="appointment_time"    />
+        <result property="contactName"    column="contact_name"    />
+        <result property="contactPhone"    column="contact_phone"    />
+        <result property="message"    column="message"    />
+        <result property="status"    column="status"    />
+        <result property="cancelReason"    column="cancel_reason"    />
+        <result property="source"    column="source"    />
+        <result property="createTime"    column="create_time"    />
+        <result property="updateTime"    column="update_time"    />
+    </resultMap>
+
+    <sql id="selectRentalAppointmentVo">
+        select appointment_id, house_id, tenant_id, owner_id, agent_id, appointment_time, contact_name, contact_phone, message, status, cancel_reason, source, create_time, update_time from rental_appointment
+    </sql>
+
+    <select id="selectRentalAppointmentList" parameterType="RentalAppointment" resultMap="RentalAppointmentResult">
+        <include refid="selectRentalAppointmentVo"/>
+        <where>  
+            <if test="houseId != null "> and house_id = #{houseId}</if>
+            <if test="tenantId != null "> and tenant_id = #{tenantId}</if>
+            <if test="ownerId != null "> and owner_id = #{ownerId}</if>
+            <if test="agentId != null "> and agent_id = #{agentId}</if>
+            <if test="appointmentTime != null "> and appointment_time = #{appointmentTime}</if>
+            <if test="contactName != null  and contactName != ''"> and contact_name like concat('%', #{contactName}, '%')</if>
+            <if test="contactPhone != null  and contactPhone != ''"> and contact_phone = #{contactPhone}</if>
+            <if test="message != null  and message != ''"> and message = #{message}</if>
+            <if test="status != null  and status != ''"> and status = #{status}</if>
+            <if test="cancelReason != null  and cancelReason != ''"> and cancel_reason = #{cancelReason}</if>
+            <if test="source != null  and source != ''"> and source = #{source}</if>
+        </where>
+    </select>
+    
+    <select id="selectRentalAppointmentByAppointmentId" parameterType="Long" resultMap="RentalAppointmentResult">
+        <include refid="selectRentalAppointmentVo"/>
+        where appointment_id = #{appointmentId}
+    </select>
+
+    <insert id="insertRentalAppointment" parameterType="RentalAppointment" useGeneratedKeys="true" keyProperty="appointmentId">
+        insert into rental_appointment
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="houseId != null">house_id,</if>
+            <if test="tenantId != null">tenant_id,</if>
+            <if test="ownerId != null">owner_id,</if>
+            <if test="agentId != null">agent_id,</if>
+            <if test="appointmentTime != null">appointment_time,</if>
+            <if test="contactName != null">contact_name,</if>
+            <if test="contactPhone != null">contact_phone,</if>
+            <if test="message != null">message,</if>
+            <if test="status != null">status,</if>
+            <if test="cancelReason != null">cancel_reason,</if>
+            <if test="source != null">source,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateTime != null">update_time,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="houseId != null">#{houseId},</if>
+            <if test="tenantId != null">#{tenantId},</if>
+            <if test="ownerId != null">#{ownerId},</if>
+            <if test="agentId != null">#{agentId},</if>
+            <if test="appointmentTime != null">#{appointmentTime},</if>
+            <if test="contactName != null">#{contactName},</if>
+            <if test="contactPhone != null">#{contactPhone},</if>
+            <if test="message != null">#{message},</if>
+            <if test="status != null">#{status},</if>
+            <if test="cancelReason != null">#{cancelReason},</if>
+            <if test="source != null">#{source},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+         </trim>
+    </insert>
+
+    <update id="updateRentalAppointment" parameterType="RentalAppointment">
+        update rental_appointment
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="houseId != null">house_id = #{houseId},</if>
+            <if test="tenantId != null">tenant_id = #{tenantId},</if>
+            <if test="ownerId != null">owner_id = #{ownerId},</if>
+            <if test="agentId != null">agent_id = #{agentId},</if>
+            <if test="appointmentTime != null">appointment_time = #{appointmentTime},</if>
+            <if test="contactName != null">contact_name = #{contactName},</if>
+            <if test="contactPhone != null">contact_phone = #{contactPhone},</if>
+            <if test="message != null">message = #{message},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="cancelReason != null">cancel_reason = #{cancelReason},</if>
+            <if test="source != null">source = #{source},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </trim>
+        where appointment_id = #{appointmentId}
+    </update>
+
+    <delete id="deleteRentalAppointmentByAppointmentId" parameterType="Long">
+        delete from rental_appointment where appointment_id = #{appointmentId}
+    </delete>
+
+    <delete id="deleteRentalAppointmentByAppointmentIds" parameterType="String">
+        delete from rental_appointment where appointment_id in 
+        <foreach item="appointmentId" collection="array" open="(" separator="," close=")">
+            #{appointmentId}
+        </foreach>
+    </delete>
+</mapper>

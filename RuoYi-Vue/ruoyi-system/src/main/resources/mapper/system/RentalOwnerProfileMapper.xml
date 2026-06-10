@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.RentalOwnerProfileMapper">
+    
+    <resultMap type="RentalOwnerProfile" id="RentalOwnerProfileResult">
+        <result property="ownerId"    column="owner_id"    />
+        <result property="realName"    column="real_name"    />
+        <result property="idCardNo"    column="id_card_no"    />
+        <result property="contactPhone"    column="contact_phone"    />
+        <result property="bankAccount"    column="bank_account"    />
+        <result property="verifyStatus"    column="verify_status"    />
+        <result property="verifyReason"    column="verify_reason"    />
+        <result property="createTime"    column="create_time"    />
+        <result property="updateTime"    column="update_time"    />
+    </resultMap>
+
+    <sql id="selectRentalOwnerProfileVo">
+        select owner_id, real_name, id_card_no, contact_phone, bank_account, verify_status, verify_reason, create_time, update_time from rental_owner_profile
+    </sql>
+
+    <select id="selectRentalOwnerProfileList" parameterType="RentalOwnerProfile" resultMap="RentalOwnerProfileResult">
+        <include refid="selectRentalOwnerProfileVo"/>
+        <where>  
+            <if test="realName != null  and realName != ''"> and real_name like concat('%', #{realName}, '%')</if>
+            <if test="idCardNo != null  and idCardNo != ''"> and id_card_no = #{idCardNo}</if>
+            <if test="contactPhone != null  and contactPhone != ''"> and contact_phone = #{contactPhone}</if>
+            <if test="bankAccount != null  and bankAccount != ''"> and bank_account = #{bankAccount}</if>
+            <if test="verifyStatus != null  and verifyStatus != ''"> and verify_status = #{verifyStatus}</if>
+            <if test="verifyReason != null  and verifyReason != ''"> and verify_reason = #{verifyReason}</if>
+        </where>
+    </select>
+    
+    <select id="selectRentalOwnerProfileByOwnerId" parameterType="Long" resultMap="RentalOwnerProfileResult">
+        <include refid="selectRentalOwnerProfileVo"/>
+        where owner_id = #{ownerId}
+    </select>
+
+    <insert id="insertRentalOwnerProfile" parameterType="RentalOwnerProfile">
+        insert into rental_owner_profile
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="ownerId != null">owner_id,</if>
+            <if test="realName != null">real_name,</if>
+            <if test="idCardNo != null">id_card_no,</if>
+            <if test="contactPhone != null">contact_phone,</if>
+            <if test="bankAccount != null">bank_account,</if>
+            <if test="verifyStatus != null">verify_status,</if>
+            <if test="verifyReason != null">verify_reason,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateTime != null">update_time,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="ownerId != null">#{ownerId},</if>
+            <if test="realName != null">#{realName},</if>
+            <if test="idCardNo != null">#{idCardNo},</if>
+            <if test="contactPhone != null">#{contactPhone},</if>
+            <if test="bankAccount != null">#{bankAccount},</if>
+            <if test="verifyStatus != null">#{verifyStatus},</if>
+            <if test="verifyReason != null">#{verifyReason},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+         </trim>
+    </insert>
+
+    <update id="updateRentalOwnerProfile" parameterType="RentalOwnerProfile">
+        update rental_owner_profile
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="realName != null">real_name = #{realName},</if>
+            <if test="idCardNo != null">id_card_no = #{idCardNo},</if>
+            <if test="contactPhone != null">contact_phone = #{contactPhone},</if>
+            <if test="bankAccount != null">bank_account = #{bankAccount},</if>
+            <if test="verifyStatus != null">verify_status = #{verifyStatus},</if>
+            <if test="verifyReason != null">verify_reason = #{verifyReason},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </trim>
+        where owner_id = #{ownerId}
+    </update>
+
+    <delete id="deleteRentalOwnerProfileByOwnerId" parameterType="Long">
+        delete from rental_owner_profile where owner_id = #{ownerId}
+    </delete>
+
+    <delete id="deleteRentalOwnerProfileByOwnerIds" parameterType="String">
+        delete from rental_owner_profile where owner_id in 
+        <foreach item="ownerId" collection="array" open="(" separator="," close=")">
+            #{ownerId}
+        </foreach>
+    </delete>
+</mapper>

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.AiKnowledgeDocMapper">
+    
+    <resultMap type="AiKnowledgeDoc" id="AiKnowledgeDocResult">
+        <result property="docId"    column="doc_id"    />
+        <result property="title"    column="title"    />
+        <result property="category"    column="category"    />
+        <result property="content"    column="content"    />
+        <result property="version"    column="version"    />
+        <result property="enabled"    column="enabled"    />
+        <result property="vectorStatus"    column="vector_status"    />
+        <result property="createBy"    column="create_by"    />
+        <result property="createTime"    column="create_time"    />
+        <result property="updateBy"    column="update_by"    />
+        <result property="updateTime"    column="update_time"    />
+    </resultMap>
+
+    <sql id="selectAiKnowledgeDocVo">
+        select doc_id, title, category, content, version, enabled, vector_status, create_by, create_time, update_by, update_time from ai_knowledge_doc
+    </sql>
+
+    <select id="selectAiKnowledgeDocList" parameterType="AiKnowledgeDoc" resultMap="AiKnowledgeDocResult">
+        <include refid="selectAiKnowledgeDocVo"/>
+        <where>  
+            <if test="title != null  and title != ''"> and title = #{title}</if>
+            <if test="category != null  and category != ''"> and category = #{category}</if>
+            <if test="content != null  and content != ''"> and content = #{content}</if>
+            <if test="version != null  and version != ''"> and version = #{version}</if>
+            <if test="enabled != null  and enabled != ''"> and enabled = #{enabled}</if>
+            <if test="vectorStatus != null  and vectorStatus != ''"> and vector_status = #{vectorStatus}</if>
+        </where>
+    </select>
+    
+    <select id="selectAiKnowledgeDocByDocId" parameterType="Long" resultMap="AiKnowledgeDocResult">
+        <include refid="selectAiKnowledgeDocVo"/>
+        where doc_id = #{docId}
+    </select>
+
+    <insert id="insertAiKnowledgeDoc" parameterType="AiKnowledgeDoc" useGeneratedKeys="true" keyProperty="docId">
+        insert into ai_knowledge_doc
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="title != null and title != ''">title,</if>
+            <if test="category != null and category != ''">category,</if>
+            <if test="content != null and content != ''">content,</if>
+            <if test="version != null">version,</if>
+            <if test="enabled != null">enabled,</if>
+            <if test="vectorStatus != null">vector_status,</if>
+            <if test="createBy != null">create_by,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateBy != null">update_by,</if>
+            <if test="updateTime != null">update_time,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="title != null and title != ''">#{title},</if>
+            <if test="category != null and category != ''">#{category},</if>
+            <if test="content != null and content != ''">#{content},</if>
+            <if test="version != null">#{version},</if>
+            <if test="enabled != null">#{enabled},</if>
+            <if test="vectorStatus != null">#{vectorStatus},</if>
+            <if test="createBy != null">#{createBy},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateBy != null">#{updateBy},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+         </trim>
+    </insert>
+
+    <update id="updateAiKnowledgeDoc" parameterType="AiKnowledgeDoc">
+        update ai_knowledge_doc
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="title != null and title != ''">title = #{title},</if>
+            <if test="category != null and category != ''">category = #{category},</if>
+            <if test="content != null and content != ''">content = #{content},</if>
+            <if test="version != null">version = #{version},</if>
+            <if test="enabled != null">enabled = #{enabled},</if>
+            <if test="vectorStatus != null">vector_status = #{vectorStatus},</if>
+            <if test="createBy != null">create_by = #{createBy},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </trim>
+        where doc_id = #{docId}
+    </update>
+
+    <delete id="deleteAiKnowledgeDocByDocId" parameterType="Long">
+        delete from ai_knowledge_doc where doc_id = #{docId}
+    </delete>
+
+    <delete id="deleteAiKnowledgeDocByDocIds" parameterType="String">
+        delete from ai_knowledge_doc where doc_id in 
+        <foreach item="docId" collection="array" open="(" separator="," close=")">
+            #{docId}
+        </foreach>
+    </delete>
+</mapper>

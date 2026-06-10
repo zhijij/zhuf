@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.AiToolAuditLogMapper">
+    
+    <resultMap type="AiToolAuditLog" id="AiToolAuditLogResult">
+        <result property="logId"    column="log_id"    />
+        <result property="requestId"    column="request_id"    />
+        <result property="sessionId"    column="session_id"    />
+        <result property="userId"    column="user_id"    />
+        <result property="role"    column="role"    />
+        <result property="toolName"    column="tool_name"    />
+        <result property="toolArgs"    column="tool_args"    />
+        <result property="toolResult"    column="tool_result"    />
+        <result property="success"    column="success"    />
+        <result property="errorMsg"    column="error_msg"    />
+        <result property="costMs"    column="cost_ms"    />
+        <result property="createTime"    column="create_time"    />
+    </resultMap>
+
+    <sql id="selectAiToolAuditLogVo">
+        select log_id, request_id, session_id, user_id, role, tool_name, tool_args, tool_result, success, error_msg, cost_ms, create_time from ai_tool_audit_log
+    </sql>
+
+    <select id="selectAiToolAuditLogList" parameterType="AiToolAuditLog" resultMap="AiToolAuditLogResult">
+        <include refid="selectAiToolAuditLogVo"/>
+        <where>  
+            <if test="requestId != null  and requestId != ''"> and request_id = #{requestId}</if>
+            <if test="sessionId != null "> and session_id = #{sessionId}</if>
+            <if test="userId != null "> and user_id = #{userId}</if>
+            <if test="role != null  and role != ''"> and role = #{role}</if>
+            <if test="toolName != null  and toolName != ''"> and tool_name like concat('%', #{toolName}, '%')</if>
+            <if test="toolArgs != null  and toolArgs != ''"> and tool_args = #{toolArgs}</if>
+            <if test="toolResult != null  and toolResult != ''"> and tool_result = #{toolResult}</if>
+            <if test="success != null  and success != ''"> and success = #{success}</if>
+            <if test="errorMsg != null  and errorMsg != ''"> and error_msg = #{errorMsg}</if>
+            <if test="costMs != null "> and cost_ms = #{costMs}</if>
+        </where>
+    </select>
+    
+    <select id="selectAiToolAuditLogByLogId" parameterType="Long" resultMap="AiToolAuditLogResult">
+        <include refid="selectAiToolAuditLogVo"/>
+        where log_id = #{logId}
+    </select>
+
+    <insert id="insertAiToolAuditLog" parameterType="AiToolAuditLog" useGeneratedKeys="true" keyProperty="logId">
+        insert into ai_tool_audit_log
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="requestId != null">request_id,</if>
+            <if test="sessionId != null">session_id,</if>
+            <if test="userId != null">user_id,</if>
+            <if test="role != null">role,</if>
+            <if test="toolName != null and toolName != ''">tool_name,</if>
+            <if test="toolArgs != null">tool_args,</if>
+            <if test="toolResult != null">tool_result,</if>
+            <if test="success != null">success,</if>
+            <if test="errorMsg != null">error_msg,</if>
+            <if test="costMs != null">cost_ms,</if>
+            <if test="createTime != null">create_time,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="requestId != null">#{requestId},</if>
+            <if test="sessionId != null">#{sessionId},</if>
+            <if test="userId != null">#{userId},</if>
+            <if test="role != null">#{role},</if>
+            <if test="toolName != null and toolName != ''">#{toolName},</if>
+            <if test="toolArgs != null">#{toolArgs},</if>
+            <if test="toolResult != null">#{toolResult},</if>
+            <if test="success != null">#{success},</if>
+            <if test="errorMsg != null">#{errorMsg},</if>
+            <if test="costMs != null">#{costMs},</if>
+            <if test="createTime != null">#{createTime},</if>
+         </trim>
+    </insert>
+
+    <update id="updateAiToolAuditLog" parameterType="AiToolAuditLog">
+        update ai_tool_audit_log
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="requestId != null">request_id = #{requestId},</if>
+            <if test="sessionId != null">session_id = #{sessionId},</if>
+            <if test="userId != null">user_id = #{userId},</if>
+            <if test="role != null">role = #{role},</if>
+            <if test="toolName != null and toolName != ''">tool_name = #{toolName},</if>
+            <if test="toolArgs != null">tool_args = #{toolArgs},</if>
+            <if test="toolResult != null">tool_result = #{toolResult},</if>
+            <if test="success != null">success = #{success},</if>
+            <if test="errorMsg != null">error_msg = #{errorMsg},</if>
+            <if test="costMs != null">cost_ms = #{costMs},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+        </trim>
+        where log_id = #{logId}
+    </update>
+
+    <delete id="deleteAiToolAuditLogByLogId" parameterType="Long">
+        delete from ai_tool_audit_log where log_id = #{logId}
+    </delete>
+
+    <delete id="deleteAiToolAuditLogByLogIds" parameterType="String">
+        delete from ai_tool_audit_log where log_id in 
+        <foreach item="logId" collection="array" open="(" separator="," close=")">
+            #{logId}
+        </foreach>
+    </delete>
+</mapper>
