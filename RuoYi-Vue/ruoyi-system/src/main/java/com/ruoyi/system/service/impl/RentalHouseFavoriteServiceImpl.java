@@ -2,11 +2,13 @@ package com.ruoyi.system.service.impl;
 
 import java.util.List;
 import com.ruoyi.common.utils.DateUtils;
+import com.ruoyi.common.exception.ServiceException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import com.ruoyi.system.mapper.RentalHouseFavoriteMapper;
 import com.ruoyi.system.domain.RentalHouseFavorite;
 import com.ruoyi.system.service.IRentalHouseFavoriteService;
+import com.ruoyi.system.service.IRentalHouseService;
 
 /**
  * 房源收藏Service业务层处理
@@ -19,6 +21,9 @@ public class RentalHouseFavoriteServiceImpl implements IRentalHouseFavoriteServi
 {
     @Autowired
     private RentalHouseFavoriteMapper rentalHouseFavoriteMapper;
+
+    @Autowired
+    private IRentalHouseService rentalHouseService;
 
     /**
      * 查询房源收藏
@@ -55,6 +60,42 @@ public class RentalHouseFavoriteServiceImpl implements IRentalHouseFavoriteServi
     {
         rentalHouseFavorite.setCreateTime(DateUtils.getNowDate());
         return rentalHouseFavoriteMapper.insertRentalHouseFavorite(rentalHouseFavorite);
+    }
+
+    @Override
+    public int favoriteHouse(Long userId, Long houseId)
+    {
+        if (houseId == null)
+        {
+            throw new ServiceException("请选择收藏房源");
+        }
+        rentalHouseService.selectRentalHouseDetail(houseId, userId, false);
+        if (isHouseFavorited(userId, houseId))
+        {
+            return 1;
+        }
+        RentalHouseFavorite favorite = new RentalHouseFavorite();
+        favorite.setUserId(userId);
+        favorite.setHouseId(houseId);
+        return insertRentalHouseFavorite(favorite);
+    }
+
+    @Override
+    public int cancelFavoriteHouse(Long userId, Long houseId)
+    {
+        RentalHouseFavorite favorite = new RentalHouseFavorite();
+        favorite.setUserId(userId);
+        favorite.setHouseId(houseId);
+        return rentalHouseFavoriteMapper.deleteRentalHouseFavoriteByUserAndHouse(favorite);
+    }
+
+    @Override
+    public boolean isHouseFavorited(Long userId, Long houseId)
+    {
+        RentalHouseFavorite query = new RentalHouseFavorite();
+        query.setUserId(userId);
+        query.setHouseId(houseId);
+        return !rentalHouseFavoriteMapper.selectRentalHouseFavoriteList(query).isEmpty();
     }
 
     /**

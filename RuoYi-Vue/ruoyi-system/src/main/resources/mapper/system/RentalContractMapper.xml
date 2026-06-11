@@ -45,6 +45,13 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             <if test="status != null  and status != ''"> and status = #{status}</if>
         </where>
     </select>
+
+    <select id="selectRentalContractListByParticipant" parameterType="Long" resultMap="RentalContractResult">
+        <include refid="selectRentalContractVo"/>
+        where tenant_id = #{userId}
+           or owner_id = #{userId}
+           or agent_id = #{userId}
+    </select>
     
     <select id="selectRentalContractByContractId" parameterType="Long" resultMap="RentalContractResult">
         <include refid="selectRentalContractVo"/>

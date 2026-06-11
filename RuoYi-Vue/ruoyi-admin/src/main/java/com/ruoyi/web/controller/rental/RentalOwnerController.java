@@ -9,11 +9,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.core.controller.BaseController;
 import com.ruoyi.common.core.domain.AjaxResult;
+import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.common.utils.SecurityUtils;
-import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.system.domain.BizChatSession;
 import com.ruoyi.system.domain.RentalHouse;
 import com.ruoyi.system.domain.RentalHouseEntrust;
@@ -50,75 +51,29 @@ public class RentalOwnerController extends BaseController
     }
 
     @PreAuthorize("@ss.hasAnyRoles('admin,owner')")
+    @Log(title = "房东提交房源", businessType = BusinessType.INSERT)
     @PostMapping("/houses")
     public AjaxResult createHouse(@RequestBody RentalHouse rentalHouse)
     {
-        rentalHouse.setOwnerId(SecurityUtils.getUserId());
-        rentalHouse.setCreateBy(SecurityUtils.getUsername());
-        prepareHouseDefaults(rentalHouse);
-
-        if ("1".equals(rentalHouse.getOperationMode()))
-        {
-            if (rentalHouse.getAgentId() == null)
-            {
-                throw new ServiceException("委托中介时必须选择中介用户");
-            }
-            rentalHouse.setStatus("0");
-            rentalHouse.setAuditStatus("0");
-            rentalHouseService.insertRentalHouse(rentalHouse);
-
-            RentalHouseEntrust entrust = buildEntrustFromHouse(rentalHouse);
-            rentalHouseEntrustService.insertRentalHouseEntrust(entrust);
-            BizChatSession chatSession = bizChatService.openSession("entrust", entrust.getEntrustId());
-            return AjaxResult.success("委托申请已提交，等待中介确认")
-                    .put("house", rentalHouse)
-                    .put("entrust", entrust)
-                    .put("chatSession", chatSession);
-        }
-
-        rentalHouse.setAgentId(null);
-        rentalHouse.setOperationMode("0");
-        rentalHouse.setStatus("2");
-        rentalHouse.setAuditStatus("2");
-        rentalHouseService.insertRentalHouse(rentalHouse);
-        return AjaxResult.success("房源已直接进入房库", rentalHouse);
+        rentalHouseService.submitRentalHouse(rentalHouse, SecurityUtils.getUserId(), SecurityUtils.getUsername());
+        return AjaxResult.success("房源已提交，等待管理员审核", rentalHouse);
     }
 
     @PreAuthorize("@ss.hasAnyRoles('admin,owner')")
+    @Log(title = "重新提交房源审核", businessType = BusinessType.UPDATE)
     @PostMapping("/houses/{houseId}/submit-audit")
     public AjaxResult submitAudit(@PathVariable Long houseId)
     {
-        RentalHouse house = assertOwnerHouse(houseId);
-        house.setStatus("1");
-        house.setAuditStatus("1");
-        house.setUpdateBy(SecurityUtils.getUsername());
-        return toAjax(rentalHouseService.updateRentalHouse(house));
+        assertOwnerHouse(houseId);
+        return toAjax(rentalHouseService.resubmitRentalHouseAudit(houseId, SecurityUtils.getUserId(), SecurityUtils.getUsername()));
     }
 
     @PreAuthorize("@ss.hasAnyRoles('admin,owner')")
+    @Log(title = "申请房源委托", businessType = BusinessType.INSERT)
     @PostMapping("/houses/{houseId}/entrust")
     public AjaxResult createEntrust(@PathVariable Long houseId, @RequestBody RentalHouseEntrust entrust)
     {
-        RentalHouse house = assertOwnerHouse(houseId);
-        if (entrust.getAgentId() == null)
-        {
-            throw new ServiceException("请选择中介用户");
-        }
-
-        entrust.setHouseId(houseId);
-        entrust.setOwnerId(house.getOwnerId());
-        entrust.setStatus("0");
-        rentalHouseEntrustService.insertRentalHouseEntrust(entrust);
-
-        RentalHouse update = new RentalHouse();
-        update.setHouseId(houseId);
-        update.setOperationMode("1");
-        update.setAgentId(entrust.getAgentId());
-        update.setStatus("0");
-        update.setAuditStatus("0");
-        update.setUpdateBy(SecurityUtils.getUsername());
-        rentalHouseService.updateRentalHouse(update);
-
+        entrust = rentalHouseService.entrustRentalHouse(houseId, entrust, SecurityUtils.getUserId(), SecurityUtils.getUsername());
         BizChatSession chatSession = bizChatService.openSession("entrust", entrust.getEntrustId());
         return AjaxResult.success("委托申请已提交，等待中介确认")
                 .put("entrust", entrust)
@@ -150,38 +105,4 @@ public class RentalOwnerController extends BaseController
         return house;
     }
 
-    private void prepareHouseDefaults(RentalHouse rentalHouse)
-    {
-        if (StringUtils.isEmpty(rentalHouse.getOperationMode()))
-        {
-            rentalHouse.setOperationMode("0");
-        }
-        if (rentalHouse.getViewCount() == null)
-        {
-            rentalHouse.setViewCount(0L);
-        }
-        if (rentalHouse.getFavoriteCount() == null)
-        {
-            rentalHouse.setFavoriteCount(0L);
-        }
-        if (StringUtils.isEmpty(rentalHouse.getAiIndexStatus()))
-        {
-            rentalHouse.setAiIndexStatus("0");
-        }
-        if (StringUtils.isEmpty(rentalHouse.getDelFlag()))
-        {
-            rentalHouse.setDelFlag("0");
-        }
-    }
-
-    private RentalHouseEntrust buildEntrustFromHouse(RentalHouse house)
-    {
-        RentalHouseEntrust entrust = new RentalHouseEntrust();
-        entrust.setHouseId(house.getHouseId());
-        entrust.setOwnerId(house.getOwnerId());
-        entrust.setAgentId(house.getAgentId());
-        entrust.setEntrustScope("发布,预约,带看,签约");
-        entrust.setStatus("0");
-        return entrust;
-    }
 }

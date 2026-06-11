@@ -44,6 +44,14 @@ public interface RentalHouseMapper
     public int updateRentalHouse(RentalHouse rentalHouse);
 
     /**
+     * 清除房源委托中介，恢复房东自营。
+     *
+     * @param houseId 房源ID
+     * @return 结果
+     */
+    public int clearRentalHouseAgent(Long houseId);
+
+    /**
      * 删除租赁房源
      * 
      * @param houseId 租赁房源主键

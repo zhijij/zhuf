@@ -56,6 +56,12 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         delete from rental_house_favorite where favorite_id = #{favoriteId}
     </delete>
 
+    <delete id="deleteRentalHouseFavoriteByUserAndHouse" parameterType="RentalHouseFavorite">
+        delete from rental_house_favorite
+        where user_id = #{userId}
+          and house_id = #{houseId}
+    </delete>
+
     <delete id="deleteRentalHouseFavoriteByFavoriteIds" parameterType="String">
         delete from rental_house_favorite where favorite_id in 
         <foreach item="favoriteId" collection="array" open="(" separator="," close=")">

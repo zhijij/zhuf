@@ -217,6 +217,14 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         where house_id = #{houseId}
     </update>
 
+    <update id="clearRentalHouseAgent" parameterType="Long">
+        update rental_house
+        set agent_id = null,
+            operation_mode = '0',
+            update_time = sysdate()
+        where house_id = #{houseId}
+    </update>
+
     <delete id="deleteRentalHouseByHouseId" parameterType="Long">
         delete from rental_house where house_id = #{houseId}
     </delete>

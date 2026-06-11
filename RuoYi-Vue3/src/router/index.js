@@ -52,6 +52,12 @@ export const constantRoutes = [
     redirect: '/portal/index',
     children: [
       {
+        path: 'business-test',
+        component: () => import('@/views/portal/business-test.vue'),
+        name: 'RentalBusinessTest',
+        meta: { title: '租赁业务测试台', icon: 'list' }
+      },
+      {
         path: 'index',
         component: () => import('@/views/portal/index.vue'),
         name: 'PortalHome',

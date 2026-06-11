@@ -11,14 +11,16 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.core.controller.BaseController;
 import com.ruoyi.common.core.domain.AjaxResult;
+import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.common.utils.SecurityUtils;
 import com.ruoyi.system.domain.RentalAppointment;
-import com.ruoyi.system.domain.RentalContract;
 import com.ruoyi.system.domain.RentalHouse;
+import com.ruoyi.system.domain.dto.RentalAppointmentActionRequest;
 import com.ruoyi.system.service.IRentalAppointmentService;
-import com.ruoyi.system.service.IRentalContractService;
 import com.ruoyi.system.service.IRentalHouseService;
 
 @RestController
@@ -31,44 +33,44 @@ public class RentalPortalController extends BaseController
     @Autowired
     private IRentalAppointmentService rentalAppointmentService;
 
-    @Autowired
-    private IRentalContractService rentalContractService;
-
     @GetMapping("/houses")
     public AjaxResult listHouses(RentalHouse rentalHouse)
     {
-        rentalHouse.setStatus("2");
-        List<RentalHouse> list = rentalHouseService.selectRentalHouseList(rentalHouse);
+        List<RentalHouse> list = rentalHouseService.selectPublicRentalHouseList(rentalHouse);
         return AjaxResult.success(list);
     }
 
     @GetMapping("/houses/{houseId}")
     public AjaxResult getHouse(@PathVariable Long houseId)
     {
-        return AjaxResult.success(rentalHouseService.selectRentalHouseByHouseId(houseId));
+        return AjaxResult.success(rentalHouseService.selectRentalHouseDetail(houseId, currentUserIdOrNull(), isPlatformAdmin()));
     }
 
+    @PreAuthorize("@ss.hasAnyRoles('admin,user,tenant')")
+    @Log(title = "门户提交看房预约", businessType = BusinessType.INSERT)
     @PostMapping("/appointments")
     public AjaxResult createAppointment(@RequestBody RentalAppointment rentalAppointment)
     {
-        rentalAppointment.setTenantId(SecurityUtils.getUserId());
-        rentalAppointment.setSource("0");
-        return toAjax(rentalAppointmentService.insertRentalAppointment(rentalAppointment));
+        return toAjax(rentalAppointmentService.createTenantAppointment(rentalAppointment, SecurityUtils.getUserId()));
+    }
+
+    @PreAuthorize("@ss.hasAnyRoles('admin,user,tenant')")
+    @Log(title = "门户取消看房预约", businessType = BusinessType.UPDATE)
+    @PostMapping("/appointments/{appointmentId}/cancel")
+    public AjaxResult cancelAppointment(@PathVariable Long appointmentId, @RequestBody(required = false) RentalAppointmentActionRequest request)
+    {
+        String reason = request == null ? null : request.getReason();
+        return toAjax(rentalAppointmentService.cancelTenantAppointment(appointmentId, SecurityUtils.getUserId(), reason));
     }
 
     @GetMapping("/summary")
     public AjaxResult summary()
     {
         RentalHouse houseQuery = new RentalHouse();
-        houseQuery.setStatus("2");
-        int houseCount = rentalHouseService.selectRentalHouseList(houseQuery).size();
-        int appointmentCount = rentalAppointmentService.selectRentalAppointmentList(new RentalAppointment()).size();
-        int contractCount = rentalContractService.selectRentalContractList(new RentalContract()).size();
+        int houseCount = rentalHouseService.selectPublicRentalHouseList(houseQuery).size();
 
         Map<String, Object> summary = new HashMap<>();
         summary.put("houseCount", houseCount);
-        summary.put("appointmentCount", appointmentCount);
-        summary.put("contractCount", contractCount);
         summary.put("avgRent", BigDecimal.ZERO);
         return AjaxResult.success(summary);
     }
@@ -91,5 +93,29 @@ public class RentalPortalController extends BaseController
         panel.put("desc", desc);
         panel.put("items", items);
         return panel;
+    }
+
+    private Long currentUserIdOrNull()
+    {
+        try
+        {
+            return SecurityUtils.getUserId();
+        }
+        catch (Exception e)
+        {
+            return null;
+        }
+    }
+
+    private boolean isPlatformAdmin()
+    {
+        try
+        {
+            return SecurityUtils.isAdmin();
+        }
+        catch (Exception e)
+        {
+            return false;
+        }
     }
 }

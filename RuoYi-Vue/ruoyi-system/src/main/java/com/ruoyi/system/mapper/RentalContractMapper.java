@@ -28,6 +28,14 @@ public interface RentalContractMapper
     public List<RentalContract> selectRentalContractList(RentalContract rentalContract);
 
     /**
+     * 查询用户参与的租赁合同列表
+     * 
+     * @param userId 用户ID
+     * @return 租赁合同集合
+     */
+    public List<RentalContract> selectRentalContractListByParticipant(Long userId);
+
+    /**
      * 新增租赁合同
      * 
      * @param rentalContract 租赁合同

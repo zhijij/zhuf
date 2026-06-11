@@ -176,6 +176,20 @@ CREATE TABLE IF NOT EXISTS rental_contract (
   PRIMARY KEY (contract_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='租赁合同表';
 
+CREATE TABLE IF NOT EXISTS rental_contract_confirm (
+  confirm_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '确认ID',
+  contract_id BIGINT NOT NULL COMMENT '合同ID',
+  user_id BIGINT NOT NULL COMMENT '确认人用户ID',
+  user_role VARCHAR(32) NOT NULL COMMENT '确认角色:tenant,owner,agent',
+  confirm_status CHAR(1) DEFAULT '0' COMMENT '确认状态:0未确认,1已确认,2已拒绝',
+  confirm_opinion VARCHAR(500) DEFAULT NULL COMMENT '确认意见',
+  confirm_time DATETIME DEFAULT NULL COMMENT '确认时间',
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (confirm_id),
+  UNIQUE KEY uk_contract_role (contract_id, user_role)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='租赁合同确认表';
+
 CREATE TABLE IF NOT EXISTS ai_chat_session (
   session_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '会话ID',
   user_id BIGINT NOT NULL COMMENT '用户ID',
@@ -270,3 +284,19 @@ CREATE TABLE IF NOT EXISTS ai_tool_audit_log (
   create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (log_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI工具调用审计表';
+
+-- 房源合法性审核按钮权限：分配给普通管理员角色使用，超级管理员只监督不执行业务审核。
+INSERT INTO sys_menu (
+  menu_name, parent_id, order_num, path, component, query, route_name,
+  is_frame, is_cache, menu_type, visible, status, perms, icon,
+  create_by, create_time, update_by, update_time, remark
+)
+SELECT
+  '房源合法性审核', m.menu_id, '7', '', '', '', '',
+  1, 0, 'F', '0', '0', 'system:house:audit', '#',
+  'admin', sysdate(), '', null, '普通管理员执行房源合法性审核，超级管理员仅监督'
+FROM sys_menu m
+WHERE m.perms = 'system:house:list'
+  AND NOT EXISTS (
+    SELECT 1 FROM sys_menu x WHERE x.perms = 'system:house:audit'
+  );

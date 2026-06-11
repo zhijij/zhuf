@@ -8,8 +8,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.core.controller.BaseController;
 import com.ruoyi.common.core.domain.AjaxResult;
+import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.system.service.IBizChatService;
 
 /**
@@ -22,28 +24,30 @@ public class RentalChatController extends BaseController
     @Autowired
     private IBizChatService bizChatService;
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,user,owner,agent')")
+    @PreAuthorize("@ss.hasAnyRoles('admin,user,tenant,owner,agent')")
     @GetMapping("/sessions")
     public AjaxResult listSessions()
     {
         return AjaxResult.success(bizChatService.listMySessions());
     }
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,user,owner,agent')")
+    @PreAuthorize("@ss.hasAnyRoles('admin,user,tenant,owner,agent')")
     @GetMapping("/sessions/{sessionId}/messages")
     public AjaxResult listMessages(@PathVariable Long sessionId)
     {
         return AjaxResult.success(bizChatService.listMessages(sessionId));
     }
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,user,owner,agent')")
+    @PreAuthorize("@ss.hasAnyRoles('admin,user,tenant,owner,agent')")
+    @Log(title = "打开业务会话", businessType = BusinessType.OTHER)
     @PostMapping("/sessions/open")
     public AjaxResult openSession(@RequestBody OpenSessionRequest request)
     {
         return AjaxResult.success(bizChatService.openSession(request.getBizType(), request.getBizId()));
     }
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,user,owner,agent')")
+    @PreAuthorize("@ss.hasAnyRoles('admin,user,tenant,owner,agent')")
+    @Log(title = "发送业务消息", businessType = BusinessType.INSERT)
     @PostMapping("/messages")
     public AjaxResult sendMessage(@RequestBody SendMessageRequest request)
     {

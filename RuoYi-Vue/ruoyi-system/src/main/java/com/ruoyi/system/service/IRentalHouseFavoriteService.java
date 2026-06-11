@@ -36,6 +36,33 @@ public interface IRentalHouseFavoriteService
     public int insertRentalHouseFavorite(RentalHouseFavorite rentalHouseFavorite);
 
     /**
+     * 租户收藏房源。
+     *
+     * @param userId 用户ID
+     * @param houseId 房源ID
+     * @return 结果
+     */
+    public int favoriteHouse(Long userId, Long houseId);
+
+    /**
+     * 租户取消收藏房源。
+     *
+     * @param userId 用户ID
+     * @param houseId 房源ID
+     * @return 结果
+     */
+    public int cancelFavoriteHouse(Long userId, Long houseId);
+
+    /**
+     * 判断租户是否已收藏房源。
+     *
+     * @param userId 用户ID
+     * @param houseId 房源ID
+     * @return 是否已收藏
+     */
+    public boolean isHouseFavorited(Long userId, Long houseId);
+
+    /**
      * 修改房源收藏
      * 
      * @param rentalHouseFavorite 房源收藏

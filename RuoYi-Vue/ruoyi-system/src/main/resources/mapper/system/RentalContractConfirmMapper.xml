@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.RentalContractConfirmMapper">
+
+    <resultMap type="RentalContractConfirm" id="RentalContractConfirmResult">
+        <result property="confirmId" column="confirm_id" />
+        <result property="contractId" column="contract_id" />
+        <result property="userId" column="user_id" />
+        <result property="userRole" column="user_role" />
+        <result property="confirmStatus" column="confirm_status" />
+        <result property="confirmOpinion" column="confirm_opinion" />
+        <result property="confirmTime" column="confirm_time" />
+        <result property="createTime" column="create_time" />
+        <result property="updateTime" column="update_time" />
+    </resultMap>
+
+    <sql id="selectRentalContractConfirmVo">
+        select confirm_id, contract_id, user_id, user_role, confirm_status, confirm_opinion, confirm_time, create_time, update_time from rental_contract_confirm
+    </sql>
+
+    <select id="selectRentalContractConfirmList" parameterType="RentalContractConfirm" resultMap="RentalContractConfirmResult">
+        <include refid="selectRentalContractConfirmVo"/>
+        <where>
+            <if test="contractId != null"> and contract_id = #{contractId}</if>
+            <if test="userId != null"> and user_id = #{userId}</if>
+            <if test="userRole != null and userRole != ''"> and user_role = #{userRole}</if>
+            <if test="confirmStatus != null and confirmStatus != ''"> and confirm_status = #{confirmStatus}</if>
+        </where>
+        order by confirm_id asc
+    </select>
+
+    <select id="selectRentalContractConfirmByConfirmId" parameterType="Long" resultMap="RentalContractConfirmResult">
+        <include refid="selectRentalContractConfirmVo"/>
+        where confirm_id = #{confirmId}
+    </select>
+
+    <select id="selectRentalContractConfirmByContractAndRole" parameterType="RentalContractConfirm" resultMap="RentalContractConfirmResult">
+        <include refid="selectRentalContractConfirmVo"/>
+        where contract_id = #{contractId}
+          and user_role = #{userRole}
+        limit 1
+    </select>
+
+    <insert id="insertRentalContractConfirm" parameterType="RentalContractConfirm" useGeneratedKeys="true" keyProperty="confirmId">
+        insert into rental_contract_confirm
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="contractId != null">contract_id,</if>
+            <if test="userId != null">user_id,</if>
+            <if test="userRole != null">user_role,</if>
+            <if test="confirmStatus != null">confirm_status,</if>
+            <if test="confirmOpinion != null">confirm_opinion,</if>
+            <if test="confirmTime != null">confirm_time,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateTime != null">update_time,</if>
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="contractId != null">#{contractId},</if>
+            <if test="userId != null">#{userId},</if>
+            <if test="userRole != null">#{userRole},</if>
+            <if test="confirmStatus != null">#{confirmStatus},</if>
+            <if test="confirmOpinion != null">#{confirmOpinion},</if>
+            <if test="confirmTime != null">#{confirmTime},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+        </trim>
+    </insert>
+
+    <update id="updateRentalContractConfirm" parameterType="RentalContractConfirm">
+        update rental_contract_confirm
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="contractId != null">contract_id = #{contractId},</if>
+            <if test="userId != null">user_id = #{userId},</if>
+            <if test="userRole != null">user_role = #{userRole},</if>
+            <if test="confirmStatus != null">confirm_status = #{confirmStatus},</if>
+            <if test="confirmOpinion != null">confirm_opinion = #{confirmOpinion},</if>
+            <if test="confirmTime != null">confirm_time = #{confirmTime},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </trim>
+        where confirm_id = #{confirmId}
+    </update>
+
+    <delete id="deleteRentalContractConfirmByConfirmId" parameterType="Long">
+        delete from rental_contract_confirm where confirm_id = #{confirmId}
+    </delete>
+
+    <delete id="deleteRentalContractConfirmByConfirmIds" parameterType="String">
+        delete from rental_contract_confirm where confirm_id in
+        <foreach item="confirmId" collection="array" open="(" separator="," close=")">
+            #{confirmId}
+        </foreach>
+    </delete>
+</mapper>

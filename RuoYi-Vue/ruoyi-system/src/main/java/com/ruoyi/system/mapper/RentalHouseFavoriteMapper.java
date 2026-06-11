@@ -52,6 +52,14 @@ public interface RentalHouseFavoriteMapper
     public int deleteRentalHouseFavoriteByFavoriteId(Long favoriteId);
 
     /**
+     * 按用户和房源删除收藏。
+     *
+     * @param rentalHouseFavorite 收藏条件
+     * @return 结果
+     */
+    public int deleteRentalHouseFavoriteByUserAndHouse(RentalHouseFavorite rentalHouseFavorite);
+
+    /**
      * 批量删除房源收藏
      * 
      * @param favoriteIds 需要删除的数据主键集合
