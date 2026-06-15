@@ -50,7 +50,7 @@
             v-for="item in roleModeOptions"
             :key="item.value"
             :class="{ active: workMode === item.value }"
-            @click="workMode = item.value"
+            @click="changeWorkMode(item.value)"
           >
             {{ item.shortLabel }}
           </button>
@@ -889,6 +889,8 @@ const floatingAiInput = ref('')
 const floatingAiMessages = ref([
   { role: 'assistant', content: '我是右下角 AI 助手，可以随时协助找房推荐、合同摘要、房源文案和业务跟进。' }
 ])
+let recordsRequestSeq = 0
+let aiConsoleRequestSeq = 0
 
 const roles = computed(() => userStore.roles || [])
 const isAdmin = computed(() => roles.value.includes('auditor'))
@@ -1177,7 +1179,6 @@ const visibleActions = computed(() => {
 
 const chatTarget = computed(() => chatTargetFor(selected.value))
 
-watch(workMode, refreshMode)
 watch(filteredRecords, list => {
   if (!list.some(item => recordKey(item) === recordKey(selected.value))) {
     selected.value = list[0] || null
@@ -1188,14 +1189,11 @@ onMounted(() => {
   if (isAdmin.value) {
     pageMode.value = 'business'
   }
+  const shouldOpenAiConsole = route.query?.ai === 'console' && canOpenAiConsole.value
   refreshMode()
-  loadPortalSummary()
-  loadAiCapabilities()
-  if (canManageAiIndex.value) {
-    loadAiIndexTasks()
-  }
+  refreshAiOverview({ includeTasks: canManageAiIndex.value && !shouldOpenAiConsole })
   seedAgentWelcome()
-  if (route.query?.ai === 'console' && canOpenAiConsole.value) {
+  if (shouldOpenAiConsole) {
     nextTick(openAiConsole)
   }
 })
@@ -1222,6 +1220,32 @@ function switchPage(mode) {
   pageMode.value = mode
   if (mode === 'agent' && agentMessages.value.length <= 1) {
     seedAgentWelcome()
+  }
+}
+
+async function changeWorkMode(mode) {
+  if (!visibleWorkModes.value.includes(mode)) return
+  if (workMode.value === mode) {
+    await refreshMode()
+    return
+  }
+  workMode.value = mode
+  await refreshMode()
+}
+
+async function showWorkMode(mode, loader) {
+  if (!visibleWorkModes.value.includes(mode)) {
+    ElMessage.warning('当前角色暂无该入口')
+    return
+  }
+  if (workMode.value !== mode) {
+    workMode.value = mode
+    await nextTick()
+  }
+  if (loader) {
+    await loader()
+  } else {
+    await refreshMode()
   }
 }
 
@@ -1262,22 +1286,19 @@ async function handleUserCommand(command) {
 async function runPrimaryUserAction() {
   pageMode.value = 'business'
   if (isAdmin.value) {
-    workMode.value = 'admin'
-    await refreshMode()
+    await showWorkMode('admin')
     return
   }
   if (roles.value.includes('owner')) {
-    workMode.value = 'owner'
+    await showWorkMode('owner')
     openTransaction('ownerCreateHouse')
     return
   }
   if (roles.value.includes('agent')) {
-    workMode.value = 'agent'
-    await loadAgentCandidateWorkspace()
+    await showWorkMode('agent', loadAgentCandidateWorkspace)
     return
   }
-  workMode.value = 'tenant'
-  await loadTenantAppointmentsFromWorkspace()
+  await showWorkMode('tenant', loadTenantAppointmentsFromWorkspace)
 }
 
 async function openContractsShortcut() {
@@ -1286,8 +1307,7 @@ async function openContractsShortcut() {
     ElMessage.warning('当前角色暂无合同入口')
     return
   }
-  workMode.value = 'contract'
-  await loadContractRecordsToWorkspace()
+  await showWorkMode('contract')
 }
 
 async function logoutFromPortal() {
@@ -1307,15 +1327,13 @@ async function logoutFromPortal() {
 async function openAiConsole() {
   if (!canOpenAiConsole.value) return
   aiConsoleOpen.value = true
-  await refreshAiConsole()
 }
 
 async function refreshAiConsole() {
-  await loadPortalSummary()
-  await loadAiCapabilities()
-  await loadAiIndexTasks()
-  if (selected.value?.houseId) {
-    await inspectAiHouseDocumentFromSelected()
+  const requestId = ++aiConsoleRequestSeq
+  await refreshAiOverview({ includeTasks: true })
+  if (requestId === aiConsoleRequestSeq && selected.value?.houseId) {
+    await inspectAiHouseDocumentFromSelected({ silent: true })
   }
 }
 
@@ -1329,21 +1347,20 @@ function prepareMessagePanel() {
 
 async function refreshCurrent() {
   if (pageMode.value === 'business') {
-    await refreshMode()
-    await loadPortalSummary()
-    await loadAiCapabilities()
-    if (canManageAiIndex.value) {
-      await loadAiIndexTasks()
-    }
+    await Promise.all([
+      refreshMode(),
+      refreshAiOverview({ includeTasks: canManageAiIndex.value })
+    ])
   }
 }
 
 async function refreshMode() {
   if (!visibleWorkModes.value.includes(workMode.value)) {
     workMode.value = visibleWorkModes.value[0]
-    return
   }
   loading.value = true
+  const requestId = ++recordsRequestSeq
+  const mode = workMode.value
   try {
     const loaders = {
       admin: loadAdminRecords,
@@ -1352,10 +1369,13 @@ async function refreshMode() {
       agent: loadAgentRecords,
       contract: loadContractRecords
     }
-    records.value = await loaders[workMode.value]()
-    selected.value = filteredRecords.value[0] || records.value[0] || null
+    const rows = await loaders[mode]()
+    if (requestId !== recordsRequestSeq || mode !== workMode.value) return
+    applyWorkspaceRows(rows)
   } finally {
-    loading.value = false
+    if (requestId === recordsRequestSeq) {
+      loading.value = false
+    }
   }
 }
 
@@ -1410,14 +1430,28 @@ async function loadContractRecords() {
   return rowsOf(res).map(item => ({ ...item, _recordType: '租赁合同' }))
 }
 
-async function loadContractRecordsToWorkspace() {
-  const rows = await loadContractRecords()
-  records.value = rows
-  selected.value = rows[0] || null
+function rowsOf(response) {
+  if (Array.isArray(response)) return response
+  return response?.rows || response?.data || []
 }
 
-function rowsOf(response) {
-  return response?.rows || response?.data || []
+function applyWorkspaceRows(rows) {
+  records.value = Array.isArray(rows) ? rows : []
+  selected.value = filteredRecords.value[0] || records.value[0] || null
+}
+
+async function loadWorkspaceRows(loader, mapper = item => item) {
+  loading.value = true
+  const requestId = ++recordsRequestSeq
+  try {
+    const response = await loader({})
+    if (requestId !== recordsRequestSeq) return
+    applyWorkspaceRows(rowsOf(response).map(mapper))
+  } finally {
+    if (requestId === recordsRequestSeq) {
+      loading.value = false
+    }
+  }
 }
 
 function selectRecord(item) {
@@ -1907,27 +1941,19 @@ async function cancelAppointmentFromSelected() {
 }
 
 async function loadTenantFavoritesFromWorkspace() {
-  const res = await listTenantFavorites({})
-  records.value = rowsOf(res).map(item => ({ ...item, _recordType: '我的收藏' }))
-  selected.value = records.value[0] || null
+  await loadWorkspaceRows(listTenantFavorites, item => ({ ...item, _recordType: '我的收藏' }))
 }
 
 async function loadTenantAppointmentsFromWorkspace() {
-  const res = await listTenantAppointments({})
-  records.value = rowsOf(res).map(item => ({ ...item, _recordType: '我的预约' }))
-  selected.value = records.value[0] || null
+  await loadWorkspaceRows(listTenantAppointments, item => ({ ...item, _recordType: '我的预约' }))
 }
 
 async function loadTenantIntentionsFromWorkspace() {
-  const res = await listTenantIntentions({})
-  records.value = rowsOf(res).map(item => ({ ...item, _recordType: '我的意向' }))
-  selected.value = records.value[0] || null
+  await loadWorkspaceRows(listTenantIntentions, item => ({ ...item, _recordType: '我的意向' }))
 }
 
 async function loadTenantContractsFromWorkspace() {
-  const res = await listTenantContracts({})
-  records.value = rowsOf(res).map(item => ({ ...item, _recordType: '我的合同' }))
-  selected.value = records.value[0] || null
+  await loadWorkspaceRows(listTenantContracts, item => ({ ...item, _recordType: '我的合同' }))
 }
 
 async function loadTenantHouseDetailFromSelected() {
@@ -1978,9 +2004,7 @@ async function submitOwnerAuditFromSelected() {
 }
 
 async function loadOwnerHistory() {
-  const res = await listOwnerEntrusts({})
-  records.value = rowsOf(res).map(item => ({ ...item, _recordType: '历史委托' }))
-  selected.value = records.value[0] || null
+  await loadWorkspaceRows(listOwnerEntrusts, item => ({ ...item, _recordType: '历史委托' }))
 }
 
 async function inviteAgentFromSelected(row) {
@@ -2016,15 +2040,11 @@ async function applyEntrustFromSelected() {
 }
 
 async function loadAgentHistory() {
-  const res = await listAgentHouses({})
-  records.value = rowsOf(res).map(item => ({ ...item, _recordType: '受托房源' }))
-  selected.value = records.value[0] || null
+  await loadWorkspaceRows(listAgentHouses, item => ({ ...item, _recordType: '受托房源' }))
 }
 
 async function loadAgentCandidateWorkspace() {
-  const res = await listAgentCandidateHouses({})
-  records.value = rowsOf(res).map(item => ({ ...item, _recordType: '可申请房源' }))
-  selected.value = records.value[0] || null
+  await loadWorkspaceRows(listAgentCandidateHouses, item => ({ ...item, _recordType: '可申请房源' }))
 }
 
 async function loadAgentHouseDetailFromSelected() {
@@ -2187,10 +2207,19 @@ async function loadPortalSummary() {
   workspaceSummary.indexedHouseCount = data.indexedHouseCount || 0
 }
 
+async function refreshAiOverview({ includeTasks = false } = {}) {
+  const tasks = [
+    loadPortalSummary(),
+    loadAiCapabilities()
+  ]
+  if (includeTasks) {
+    tasks.push(loadAiIndexTasks())
+  }
+  await Promise.all(tasks)
+}
+
 async function loadPortalPublicHouses() {
-  const res = await listPortalHouses({})
-  records.value = rowsOf(res).map(item => ({ ...item, _recordType: '公开房源' }))
-  selected.value = records.value[0] || null
+  await loadWorkspaceRows(listPortalHouses, item => ({ ...item, _recordType: '公开房源' }))
 }
 
 async function runAiRecommendation() {
@@ -2296,11 +2325,9 @@ async function processAiTask(row) {
   if (!row?.taskId) return ElMessage.warning('请选择索引任务')
   await processAiIndexTask(row.taskId)
   ElMessage.success('索引任务已处理')
-  await loadAiIndexTasks()
-  await loadPortalSummary()
-  await loadAiCapabilities()
+  await refreshAiOverview({ includeTasks: true })
   if (selected.value?.houseId) {
-    await inspectAiHouseDocumentFromSelected()
+    await inspectAiHouseDocumentFromSelected({ silent: true })
   }
 }
 
@@ -2308,19 +2335,19 @@ async function processPendingAiTasks() {
   const res = await processPendingAiIndexTasks({ limit: 5 })
   const processed = res?.data?.processed ?? 0
   ElMessage.success(`已处理 ${processed} 个索引任务`)
-  await loadAiIndexTasks()
-  await loadPortalSummary()
-  await loadAiCapabilities()
+  await refreshAiOverview({ includeTasks: true })
   if (selected.value?.houseId) {
-    await inspectAiHouseDocumentFromSelected()
+    await inspectAiHouseDocumentFromSelected({ silent: true })
   }
 }
 
-async function inspectAiHouseDocumentFromSelected() {
+async function inspectAiHouseDocumentFromSelected(options = {}) {
   if (!selected.value?.houseId) return ElMessage.warning('请选择房源')
   const res = await inspectAiHouseDocument(selected.value.houseId)
   aiHouseDocument.value = res?.data || null
-  ElMessage.success('已读取房源文档状态')
+  if (!options.silent) {
+    ElMessage.success('已读取房源文档状态')
+  }
 }
 
 async function sendAgentMessage() {
