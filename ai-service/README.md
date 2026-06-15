@@ -17,6 +17,23 @@ FastAPI + LangChain AI service for the rental system.
 
 未配置 `AI_LLM_API_KEY` 时，服务仍使用本地规则和工具链，业务功能可用。
 
+## 租户多智能体协作
+
+租户智能体采用主管和并行混合模式，接口仍复用 `/api/v1/agent/chat` 与 `/api/v1/agent/recommend`：
+
+```text
+router
+  -> 基于用户问题、角色上下文和 RAG 命中内容判断意图、槽位和路由
+coordinator
+  -> 主管智能体生成工具计划和专家协作计划
+collaboration
+  -> 并行调用房源检索、地图生活、风险分析、知识政策、业务上下文专家
+synthesis
+  -> 汇总专家结果、工具结果和上下文，统一生成最终回复
+```
+
+响应会额外返回 `collaboration` 字段，包含 `mode`、`router`、`coordinator`、`experts` 和 `synthesis`，前端可用于展示主管智能体协作轨迹。
+
 ## Skill
 
 Skill 是业务规则说明书，放在 `app/skills`：

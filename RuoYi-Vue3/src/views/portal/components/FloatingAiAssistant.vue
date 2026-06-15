@@ -41,8 +41,9 @@
         :class="['ai-float-message', item.role]"
       >
         <div class="message-content">{{ item.content }}</div>
-        <div v-if="item.intentLabel || item.toolCalls?.length" class="ai-trace compact">
+        <div v-if="item.intentLabel || item.toolCalls?.length || item.collaboration" class="ai-trace compact">
           <span v-if="item.intentLabel">{{ item.intentLabel }}</span>
+          <span v-if="item.collaboration">{{ collaborationSummary(item.collaboration) }}</span>
           <span v-for="tool in item.toolCalls" :key="`${index}-${tool.name}`">{{ tool.label || tool.name }}</span>
         </div>
       </div>
@@ -99,6 +100,12 @@ onBeforeUnmount(stopDrag)
 function openAssistant() {
   open.value = true
   nextTick(scrollToBottom)
+}
+
+function collaborationSummary(collaboration) {
+  const experts = collaboration?.experts || []
+  if (!experts.length) return collaboration?.mode || '多智能体'
+  return experts.map(item => item.label || item.name).slice(0, 2).join(' / ')
 }
 
 function resetPosition() {

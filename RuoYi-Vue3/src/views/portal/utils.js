@@ -48,6 +48,7 @@ export function normalizeAiResponse(response) {
     intent: data?.intent || '',
     intentLabel: data?.intentLabel || '',
     toolCalls: data?.toolCalls || [],
+    collaboration: data?.collaboration || null,
     suggestions: data?.suggestions || null,
     nextActions: data?.nextActions || []
   }

@@ -384,8 +384,9 @@
         <div v-else class="agent-thread">
           <div v-for="(item, index) in agentMessages" :key="index" :class="['agent-message', item.role]">
             <div class="message-content">{{ item.content }}</div>
-            <div v-if="item.intentLabel || item.toolCalls?.length" class="ai-trace">
+            <div v-if="item.intentLabel || item.toolCalls?.length || item.collaboration" class="ai-trace">
               <span v-if="item.intentLabel">意图：{{ item.intentLabel }}</span>
+              <span v-if="item.collaboration">主管协作：{{ collaborationSummary(item.collaboration) }}</span>
               <span v-for="tool in item.toolCalls" :key="`${index}-${tool.name}`">
                 {{ tool.label || tool.name }} · {{ tool.status === 'success' ? '完成' : '异常' }}
               </span>
@@ -2489,9 +2490,16 @@ function normalizeAiMessage(response) {
     intent: aiResult.intent,
     intentLabel: aiResult.intentLabel,
     toolCalls: aiResult.toolCalls || [],
+    collaboration: aiResult.collaboration,
     suggestions: aiResult.suggestions,
     nextActions: aiResult.nextActions || []
   }
+}
+
+function collaborationSummary(collaboration) {
+  const experts = collaboration?.experts || []
+  if (!experts.length) return collaboration?.mode || '多智能体'
+  return experts.map(item => item.label || item.name).slice(0, 3).join(' / ')
 }
 </script>
 

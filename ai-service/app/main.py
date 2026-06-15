@@ -31,6 +31,7 @@ from app.config import EMBEDDING_MODEL, INTENT_LABELS, KNOWLEDGE_SOURCE_TYPES, R
 from app.langchain_runtime import build_langchain_tools, langchain_status, refine_with_langchain, tool_specs
 from app.schemas import ChatRequest, HouseIndexRequest, KnowledgeIndexRequest, RecommendRequest
 from app.skill_registry import list_skills, select_skill, skill_to_dict
+from app.tenant_agent import run_tenant_multi_agent, should_use_tenant_multi_agent
 from app.tooling import TOOL_REGISTRY, call_tool, tool, tool_description, tool_label
 from app.vector_store import (
     count_indexed_houses,
@@ -63,6 +64,13 @@ def health():
         "langchainToolCount": len(langchain_tools),
         "skills": [skill_to_dict(skill) for skill in list_skills()],
         "tools": tool_specs(TOOL_REGISTRY, tool_label, tool_description),
+        "multiAgentModes": [
+            {
+                "role": "tenant",
+                "mode": "tenant-supervisor-parallel-hybrid",
+                "agents": ["router", "coordinator", "house_search", "map_life", "risk_analysis", "synthesis"],
+            }
+        ],
     }
 
 
@@ -84,6 +92,13 @@ def agent_capabilities():
         "langchainToolCount": len(langchain_tools),
         "skills": [skill_to_dict(skill) for skill in list_skills()],
         "tools": tool_specs(TOOL_REGISTRY, tool_label, tool_description),
+        "multiAgentModes": [
+            {
+                "role": "tenant",
+                "mode": "tenant-supervisor-parallel-hybrid",
+                "agents": ["router", "coordinator", "house_search", "map_life", "risk_analysis", "synthesis"],
+            }
+        ],
         "mcpReady": True,
         "mcpPlan": "已提供 MCP 工具/资源清单，后续可独立成 MCP Server 对外注册。",
     }
@@ -94,6 +109,25 @@ def chat(request: ChatRequest):
     state = build_agent_state(request)
     intent = detect_intent(request.message, state)
     skill = select_skill(intent, state)
+    if should_use_tenant_multi_agent(state, intent):
+        result = run_tenant_multi_agent(
+            state,
+            intent,
+            skill,
+            call_tool,
+            render_agent_answer,
+            refine_with_llm_if_configured,
+        )
+        memory_updated = update_memory(state["sessionKey"], request.message, result["answer"])
+        tool_calls = result["toolCalls"]
+        return {
+            **result,
+            "houseIds": collect_house_ids(state, tool_calls),
+            "memoryUpdated": memory_updated,
+            "suggestions": extract_suggestions(tool_calls),
+            "nextActions": build_next_actions(result["intent"], state, tool_calls),
+        }
+
     tool_calls = run_agent_tools(intent, state)
     answer = render_agent_answer(intent, state, tool_calls)
     answer = refine_with_llm_if_configured(state, intent, tool_calls, answer, skill)
@@ -117,15 +151,39 @@ def recommend(request: RecommendRequest):
     state = {
         "message": request.query,
         "role": request.role or "tenant",
+        "roleLabel": ROLE_LABELS.get(request.role or "tenant", request.role or "tenant"),
         "roles": request.roles or [],
         "isAdmin": bool(request.isAdmin),
         "context": request.context or {},
         "selected": (request.context or {}).get("selected") or {},
+        "filters": (request.context or {}).get("filters") or {},
+        "visibleActions": (request.context or {}).get("visibleActions") or [],
+        "summary": (request.context or {}).get("summary") or {},
         "sessionKey": f"user:{request.userId or 'anonymous'}",
         "transactionType": None,
         "transactionTitle": None,
         "recommend": {"city": request.city, "maxRent": request.maxRent},
+        "memory": [],
     }
+    skill = select_skill("house_recommend", state)
+    if should_use_tenant_multi_agent(state, "house_recommend"):
+        result = run_tenant_multi_agent(
+            state,
+            "house_recommend",
+            skill,
+            call_tool,
+            render_agent_answer,
+            refine_with_llm_if_configured,
+        )
+        tool_calls = result["toolCalls"]
+        return {
+            **result,
+            "houseIds": collect_house_ids(state, tool_calls),
+            "memoryUpdated": False,
+            "suggestions": extract_suggestions(tool_calls),
+            "nextActions": build_next_actions(result["intent"], state, tool_calls),
+        }
+
     tool_calls = [
         call_tool(
             "search_public_houses",
@@ -135,7 +193,6 @@ def recommend(request: RecommendRequest):
             maxRent=request.maxRent,
         )
     ]
-    skill = select_skill("house_recommend", state)
     answer = render_agent_answer("house_recommend", state, tool_calls)
     answer = refine_with_llm_if_configured(state, "house_recommend", tool_calls, answer, skill)
     return {
