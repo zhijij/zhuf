@@ -37,7 +37,7 @@ public class AiVectorIndexTaskController extends BaseController
     /**
      * 查询AI向量索引任务列表
      */
-    @PreAuthorize("@ss.hasPermi('system:task:list')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:task:list')")
     @GetMapping("/list")
     public TableDataInfo list(AiVectorIndexTask aiVectorIndexTask)
     {
@@ -49,7 +49,7 @@ public class AiVectorIndexTaskController extends BaseController
     /**
      * 导出AI向量索引任务列表
      */
-    @PreAuthorize("@ss.hasPermi('system:task:export')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:task:export')")
     @Log(title = "AI向量索引任务", businessType = BusinessType.EXPORT)
     @PostMapping("/export")
     public void export(HttpServletResponse response, AiVectorIndexTask aiVectorIndexTask)
@@ -62,7 +62,7 @@ public class AiVectorIndexTaskController extends BaseController
     /**
      * 获取AI向量索引任务详细信息
      */
-    @PreAuthorize("@ss.hasPermi('system:task:query')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:task:query')")
     @GetMapping(value = "/{taskId}")
     public AjaxResult getInfo(@PathVariable("taskId") Long taskId)
     {
@@ -72,7 +72,7 @@ public class AiVectorIndexTaskController extends BaseController
     /**
      * 新增AI向量索引任务
      */
-    @PreAuthorize("@ss.hasPermi('system:task:add')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:task:add')")
     @Log(title = "AI向量索引任务", businessType = BusinessType.INSERT)
     @PostMapping
     public AjaxResult add(@RequestBody AiVectorIndexTask aiVectorIndexTask)
@@ -83,7 +83,7 @@ public class AiVectorIndexTaskController extends BaseController
     /**
      * 修改AI向量索引任务
      */
-    @PreAuthorize("@ss.hasPermi('system:task:edit')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:task:edit')")
     @Log(title = "AI向量索引任务", businessType = BusinessType.UPDATE)
     @PutMapping
     public AjaxResult edit(@RequestBody AiVectorIndexTask aiVectorIndexTask)
@@ -94,7 +94,7 @@ public class AiVectorIndexTaskController extends BaseController
     /**
      * 删除AI向量索引任务
      */
-    @PreAuthorize("@ss.hasPermi('system:task:remove')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:task:remove')")
     @Log(title = "AI向量索引任务", businessType = BusinessType.DELETE)
 	@DeleteMapping("/{taskIds}")
     public AjaxResult remove(@PathVariable Long[] taskIds)

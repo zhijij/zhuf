@@ -246,7 +246,7 @@ const filteredSessions = computed(() => {
 const activeSessionTitle = computed(() => activeSession.value ? sessionTitle(activeSession.value) : '业务沟通')
 const activeBizLabel = computed(() => {
   const session = activeSession.value || {}
-  const label = bizNameMap[session.bizType] || '业务沟通'
+  const label = bizDisplayName(session.bizType)
   return session.bizId ? `${label} #${session.bizId}` : label
 })
 
@@ -377,7 +377,7 @@ function buildChatAiRequest(message) {
       pageMode: 'chat',
       workMode: inferWorkRole(),
       selected: {
-        recordType: bizContextLabelMap[session.bizType] || '业务沟通',
+        recordType: bizContextLabel(session.bizType),
         title: sessionTitle(session),
         statusLabel: session.status,
         bizType: session.bizType,
@@ -475,7 +475,17 @@ function sessionUnread(session) {
 }
 
 function sessionTitle(session) {
-  return session.title || bizNameMap[session.bizType] || `会话 #${session.sessionId}`
+  return session.title || bizDisplayName(session.bizType) || `会话 #${session.sessionId}`
+}
+
+function bizDisplayName(bizType) {
+  if (String(bizType || '').startsWith('house:')) return '房源咨询'
+  return bizNameMap[bizType] || '业务沟通'
+}
+
+function bizContextLabel(bizType) {
+  if (String(bizType || '').startsWith('house:')) return '房源咨询'
+  return bizContextLabelMap[bizType] || '业务沟通'
 }
 
 function sessionAvatar(session) {

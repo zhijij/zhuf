@@ -25,6 +25,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             <if test="imageType != null  and imageType != ''"> and image_type = #{imageType}</if>
             <if test="sortNo != null "> and sort_no = #{sortNo}</if>
         </where>
+        order by sort_no asc, image_id asc
     </select>
     
     <select id="selectRentalHouseImageByImageId" parameterType="Long" resultMap="RentalHouseImageResult">
@@ -64,6 +65,10 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 
     <delete id="deleteRentalHouseImageByImageId" parameterType="Long">
         delete from rental_house_image where image_id = #{imageId}
+    </delete>
+
+    <delete id="deleteRentalHouseImageByHouseId" parameterType="Long">
+        delete from rental_house_image where house_id = #{houseId}
     </delete>
 
     <delete id="deleteRentalHouseImageByImageIds" parameterType="String">

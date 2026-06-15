@@ -14,6 +14,7 @@ import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.core.controller.BaseController;
 import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.enums.BusinessType;
+import com.ruoyi.system.enums.RentalHouseStatus;
 import com.ruoyi.common.utils.SecurityUtils;
 import com.ruoyi.system.domain.BizChatSession;
 import com.ruoyi.system.domain.RentalAppointment;
@@ -67,6 +68,24 @@ public class RentalTenantController extends BaseController
     public AjaxResult getHouse(@PathVariable Long houseId)
     {
         return AjaxResult.success(rentalHouseService.selectRentalHouseDetail(houseId, getUserId(), false));
+    }
+
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant')")
+    @Log(title = "发起房源咨询", businessType = BusinessType.INSERT)
+    @PostMapping("/houses/{houseId}/contact")
+    public AjaxResult contactHouseResponsible(@PathVariable Long houseId)
+    {
+        RentalHouse house = rentalHouseService.selectRentalHouseDetail(houseId, getUserId(), false);
+        if (!RentalHouseStatus.isPublicVisible(house.getStatus()))
+        {
+            return AjaxResult.error("当前房源不可咨询");
+        }
+        String bizType = "house:" + getUserId();
+        BizChatSession chatSession = bizChatService.openSession(bizType, houseId);
+        bizChatService.sendSystemMessage(bizType, houseId, "租户已发起房源咨询，请房源负责人跟进。");
+        return AjaxResult.success("已打开房源咨询")
+                .put("house", house)
+                .put("chatSession", chatSession);
     }
 
     @PreAuthorize("@ss.hasAnyExactRoles('user,tenant')")

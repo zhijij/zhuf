@@ -92,4 +92,10 @@ public class RentalHouseImageServiceImpl implements IRentalHouseImageService
     {
         return rentalHouseImageMapper.deleteRentalHouseImageByImageId(imageId);
     }
+
+    @Override
+    public int deleteRentalHouseImageByHouseId(Long houseId)
+    {
+        return rentalHouseImageMapper.deleteRentalHouseImageByHouseId(houseId);
+    }
 }

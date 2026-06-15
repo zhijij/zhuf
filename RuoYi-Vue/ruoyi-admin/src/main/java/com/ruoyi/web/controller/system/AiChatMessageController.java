@@ -37,7 +37,7 @@ public class AiChatMessageController extends BaseController
     /**
      * 查询AI消息列表
      */
-    @PreAuthorize("@ss.hasPermi('system:message:list')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:message:list')")
     @GetMapping("/list")
     public TableDataInfo list(AiChatMessage aiChatMessage)
     {
@@ -49,7 +49,7 @@ public class AiChatMessageController extends BaseController
     /**
      * 导出AI消息列表
      */
-    @PreAuthorize("@ss.hasPermi('system:message:export')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:message:export')")
     @Log(title = "AI消息", businessType = BusinessType.EXPORT)
     @PostMapping("/export")
     public void export(HttpServletResponse response, AiChatMessage aiChatMessage)
@@ -62,7 +62,7 @@ public class AiChatMessageController extends BaseController
     /**
      * 获取AI消息详细信息
      */
-    @PreAuthorize("@ss.hasPermi('system:message:query')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:message:query')")
     @GetMapping(value = "/{messageId}")
     public AjaxResult getInfo(@PathVariable("messageId") Long messageId)
     {
@@ -72,7 +72,7 @@ public class AiChatMessageController extends BaseController
     /**
      * 新增AI消息
      */
-    @PreAuthorize("@ss.hasPermi('system:message:add')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:message:add')")
     @Log(title = "AI消息", businessType = BusinessType.INSERT)
     @PostMapping
     public AjaxResult add(@RequestBody AiChatMessage aiChatMessage)
@@ -83,7 +83,7 @@ public class AiChatMessageController extends BaseController
     /**
      * 修改AI消息
      */
-    @PreAuthorize("@ss.hasPermi('system:message:edit')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:message:edit')")
     @Log(title = "AI消息", businessType = BusinessType.UPDATE)
     @PutMapping
     public AjaxResult edit(@RequestBody AiChatMessage aiChatMessage)
@@ -94,7 +94,7 @@ public class AiChatMessageController extends BaseController
     /**
      * 删除AI消息
      */
-    @PreAuthorize("@ss.hasPermi('system:message:remove')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:message:remove')")
     @Log(title = "AI消息", businessType = BusinessType.DELETE)
 	@DeleteMapping("/{messageIds}")
     public AjaxResult remove(@PathVariable Long[] messageIds)

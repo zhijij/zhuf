@@ -37,6 +37,13 @@ export function cancelTenantFavorite(houseId) {
   })
 }
 
+export function contactTenantHouseResponsible(houseId) {
+  return request({
+    url: `/rental/tenant/houses/${houseId}/contact`,
+    method: 'post'
+  })
+}
+
 export function listTenantAppointments(query) {
   return request({
     url: '/rental/tenant/appointments',

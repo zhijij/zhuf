@@ -173,31 +173,24 @@ def router(state: TenantAgentState) -> TenantAgentState:
 def structured_route(state: TenantAgentState) -> dict[str, Any]:
     llm_route = llm_route_decision(state)
     if llm_route:
-        return llm_route
+        return normalize_route(llm_route, state)
 
     message = state["message"]
-    slots = {
-        "city": (
-            extract_city(message)
-            or (state.get("recommend") or {}).get("city")
-            or (state["context"].get("filters") or {}).get("city")
-        ),
-        "maxRent": extract_budget(message) or (state.get("recommend") or {}).get("maxRent"),
-        "houseId": (state["context"].get("selected") or {}).get("houseId"),
-        "contractId": (state["context"].get("selected") or {}).get("contractId"),
-    }
+    slots = infer_route_slots(state)
     text = message.lower()
     if not message.strip():
         route = TenantRoute(intent="smalltalk", route="smalltalk", slots=slots, confidence=0.8)
     elif any(word in text for word in ["你好", "在吗", "谢谢"]):
         route = TenantRoute(intent="smalltalk", route="smalltalk", slots=slots, confidence=0.85)
-    elif any(word in text for word in ["不对", "不对吧", "不太对", "不准确", "不是这个", "你理解错了", "重新来", "重说", "纠正一下"]):
+    elif any(word in text for word in ["不对", "不对吧", "不太对", "不准确", "不是这个", "你理解错了", "重新来", "重说", "纠正一下", "不用"]):
         route = TenantRoute(intent="correction", route="smalltalk", slots=slots, confidence=0.95)
     elif any(word in text for word in ["合同", "押金", "违约", "风险"]):
         route = TenantRoute(intent="contract_risk", route="collaboration", slots=slots, confidence=0.86)
-    elif any(word in text for word in ["推荐", "找房", "房源", "预算", "地铁", "通勤", "整租", "合租"]):
+    elif is_nearby_query(text) and slots.get("houseId"):
+        route = TenantRoute(intent="context_answer", route="collaboration", slots=slots, confidence=0.82)
+    elif is_house_search_query(text):
         missing = []
-        if not slots["city"]:
+        if not slots["city"] and any(word in text for word in ["推荐", "找房"]):
             missing.append("city")
         route = TenantRoute(intent="house_recommend", route="slot_filling" if missing else "collaboration", slots=slots, missing_slots=missing, confidence=0.9)
     elif any(word in text for word in ["政策", "规则", "流程", "知识", "faq"]):
@@ -205,6 +198,116 @@ def structured_route(state: TenantAgentState) -> dict[str, Any]:
     else:
         route = TenantRoute(intent="context_answer", route="collaboration", slots=slots, confidence=0.68)
     return route.model_dump()
+
+
+def normalize_route(route: dict[str, Any], state: TenantAgentState) -> dict[str, Any]:
+    message = state["message"]
+    text = message.lower()
+    inferred_slots = infer_route_slots(state)
+    llm_slots = {
+        key: value
+        for key, value in (route.get("slots") or {}).items()
+        if value not in (None, "")
+    }
+    slots = {**inferred_slots, **llm_slots}
+    intent = str(route.get("intent") or "context_answer")
+    route_name = str(route.get("route") or "collaboration")
+    missing_slots = list(route.get("missing_slots") or [])
+    confidence = float(route.get("confidence") or 0.75)
+
+    if any(word in text for word in ["不对", "不对吧", "不太对", "不准确", "不是这个", "你理解错了", "重新来", "重说", "纠正一下", "不用"]):
+        intent = "correction"
+        route_name = "smalltalk"
+        missing_slots = []
+    elif any(word in text for word in ["合同", "押金", "违约", "风险"]):
+        intent = "contract_risk"
+        route_name = "collaboration"
+        missing_slots = []
+    elif is_nearby_query(text) and slots.get("houseId"):
+        intent = "context_answer"
+        route_name = "collaboration"
+        missing_slots = []
+    elif is_house_search_query(text):
+        intent = "house_recommend"
+        route_name = "collaboration"
+        if not slots.get("city") and any(word in text for word in ["推荐", "找房"]):
+            missing_slots = ["city"]
+            route_name = "slot_filling"
+        else:
+            missing_slots = [item for item in missing_slots if item != "city"]
+
+    return TenantRoute(
+        intent=intent,
+        route=route_name,
+        slots=slots,
+        missing_slots=missing_slots,
+        confidence=confidence,
+    ).model_dump()
+
+
+def infer_route_slots(state: TenantAgentState) -> dict[str, Any]:
+    message = state["message"]
+    context = state.get("context") or {}
+    selected = context.get("selected") or {}
+    filters = context.get("filters") or {}
+    recommend = state.get("recommend") or {}
+    city = (
+        extract_city(message)
+        or match_context_city(message, selected, filters, recommend)
+        or recommend.get("city")
+        or filters.get("city")
+        or selected.get("city")
+    )
+    return {
+        "city": city,
+        "district": filters.get("district") or selected.get("district"),
+        "maxRent": extract_budget(message) or recommend.get("maxRent"),
+        "houseId": selected.get("houseId"),
+        "contractId": selected.get("contractId"),
+        "nearbyFocus": nearby_focus(message),
+    }
+
+
+def match_context_city(
+    message: str,
+    selected: dict[str, Any],
+    filters: dict[str, Any],
+    recommend: dict[str, Any],
+) -> str | None:
+    text = message or ""
+    for source in [selected, filters, recommend]:
+        city = str(source.get("city") or "").strip()
+        if not city:
+            continue
+        aliases = {city, city.removesuffix("市")}
+        if any(alias and alias in text for alias in aliases):
+            return city
+    return None
+
+
+def is_house_search_query(text: str) -> bool:
+    return any(word in text for word in [
+        "推荐", "找房", "房源", "可租", "有房", "有没有房", "预算", "地铁", "通勤", "整租", "合租",
+    ])
+
+
+def is_nearby_query(text: str) -> bool:
+    return any(word in text for word in [
+        "周围", "周边", "附近", "旁边", "学校", "学区", "幼儿园", "小学", "中学",
+        "医院", "地铁", "公交", "商超", "超市", "配套", "通勤",
+    ])
+
+
+def nearby_focus(message: str) -> str | None:
+    if any(word in message for word in ["学校", "学区", "幼儿园", "小学", "中学"]):
+        return "education"
+    if any(word in message for word in ["地铁", "公交", "通勤"]):
+        return "transport"
+    if any(word in message for word in ["医院", "药店"]):
+        return "medical"
+    if any(word in message for word in ["商超", "超市", "商场", "菜场"]):
+        return "life"
+    return None
 
 
 def should_prefetch_rag(state: TenantAgentState) -> bool:
@@ -299,15 +402,12 @@ def coordinator(state: TenantAgentState) -> TenantAgentState:
         state = ensure_rag_loaded(state)
     llm_plan = llm_coordinator_plan(state)
     if llm_plan:
+        ensure_required_experts(state, llm_plan)
         state["coordinator"] = llm_plan
         return state
 
     route = state.get("route") or {}
-    experts = ["house_search_specialist", "map_life_specialist", "risk_analysis_specialist"]
-    if route.get("intent") == "contract_risk":
-        experts = ["risk_analysis_specialist", "house_search_specialist"]
-    if route.get("intent") == "knowledge_answer":
-        experts = []
+    experts = required_experts_for_state(state)
     state["coordinator"] = {
         "agent": "coordinator",
         "toolPlan": ["search_houses", "vector_search", "amap_search_poi"],
@@ -321,6 +421,45 @@ def coordinator(state: TenantAgentState) -> TenantAgentState:
         },
     }
     return state
+
+
+def ensure_required_experts(state: TenantAgentState, plan: dict[str, Any]) -> None:
+    collaboration_plan = plan.setdefault("collaborationPlan", {})
+    required = required_experts_for_state(state)
+    current = [
+        item
+        for item in (collaboration_plan.get("experts") or [])
+        if item in required
+    ]
+    merged = unique_ordered([*required, *current])
+    collaboration_plan["experts"] = merged
+    collaboration_plan["parallel"] = bool(merged)
+
+
+def required_experts_for_state(state: TenantAgentState) -> list[str]:
+    route = state.get("route") or {}
+    intent = route.get("intent")
+    text = str(state.get("message") or "").lower()
+    if intent == "knowledge_answer":
+        return []
+    if intent == "contract_risk":
+        return ["risk_analysis_specialist"]
+    experts: list[str] = []
+    if intent == "house_recommend" or is_house_search_query(text):
+        experts.append("house_search_specialist")
+    if is_nearby_query(text):
+        experts.append("map_life_specialist")
+    if intent == "house_recommend" and any(word in text for word in ["合同", "押金", "风险", "签约"]):
+        experts.append("risk_analysis_specialist")
+    return unique_ordered(experts)
+
+
+def unique_ordered(items: list[str]) -> list[str]:
+    result = []
+    for item in items:
+        if item and item not in result:
+            result.append(item)
+    return result
 
 
 def llm_coordinator_plan(state: TenantAgentState) -> dict[str, Any] | None:
@@ -497,12 +636,12 @@ def map_life_specialist(state: TenantAgentState) -> dict[str, Any]:
         tool_name = "amap_search_around"
         tool_label = "查询坐标周边 POI"
     else:
-        result = amap.search_poi("地铁 商超 医院", city=city, limit=50)
+        result = amap.search_poi(nearby_keywords(slots.get("nearbyFocus")), city=city, limit=50)
         tool_name = "amap_search_poi"
         tool_label = "查询周边配套"
     checks = ["通勤时间", "地铁/公交步行距离", "商超便利", "噪音与采光", "夜间安全感"]
     analysis = analyze_map_life_context(state, result)
-    summary = analysis.get("summary") or ((result.get("summary") or "地图生活专家使用兜底清单") + "；看房时重点核实：" + "、".join(checks))
+    summary = analysis.get("summary") or result.get("summary") or "周边工具未返回可用数据"
     return {
         "name": "map_life_specialist",
         "label": "地图生活专家",
@@ -527,9 +666,16 @@ def analyze_map_life_context(state: TenantAgentState, result: dict[str, Any]) ->
     totals = evidence.get("totals") or {}
     route = evidence.get("route") or {}
     parts = []
+    if not totals and not route:
+        return {
+            "summary": result.get("summary") or "周边工具未返回可用数据",
+            "evidence": evidence,
+            "source": "rules",
+        }
     if route.get("summary"):
         parts.append(f"通勤：{route.get('summary')}")
-    for label in ["交通", "生活", "医疗", "教育"]:
+    focus_labels = focus_group_labels((state.get("route") or {}).get("slots", {}).get("nearbyFocus"))
+    for label in focus_labels:
         item = totals.get(label) or {}
         nearest = item.get("nearest")
         if nearest:
@@ -544,6 +690,28 @@ def analyze_map_life_context(state: TenantAgentState, result: dict[str, Any]) ->
         "evidence": evidence,
         "source": "rules",
     }
+
+
+def nearby_keywords(focus: str | None) -> str:
+    if focus == "education":
+        return "学校 幼儿园 培训机构"
+    if focus == "transport":
+        return "地铁站 公交站"
+    if focus == "medical":
+        return "医院 药店 诊所"
+    if focus == "life":
+        return "超市 商场 便利店 菜市场"
+    return "地铁站 商超 医院 学校"
+
+
+def focus_group_labels(focus: str | None) -> list[str]:
+    mapping = {
+        "education": ["教育"],
+        "transport": ["交通"],
+        "medical": ["医疗"],
+        "life": ["生活"],
+    }
+    return mapping.get(focus or "", ["交通", "生活", "医疗", "教育"])
 
 
 def selected_location(record: dict[str, Any]) -> str | None:
@@ -667,28 +835,133 @@ def synthesis(state: TenantAgentState) -> TenantAgentState:
     elif intent == "correction":
         answer = (state.get("analysis") or {}).get("summary") or "我收到纠正了，你可以直接补充正确目标。"
     elif route.get("missing_slots"):
-        answer = (state.get("analysis") or {}).get("summary") + "，补齐后我再并行调用房源、地图和风险专家。"
+        answer = (state.get("analysis") or {}).get("summary")
     elif intent == "knowledge_answer":
         answer = "我先查了统一知识库：\n" + ((state.get("analysis") or {}).get("summary") or "暂无命中。")
     else:
-        expert_summaries = [
-            item.get("summary")
-            for item in (state.get("collaboration") or {}).get("experts", [])
-            if item.get("summary")
-        ]
-        base = "我按租户智能体的主管协作流程处理了这次请求。"
         if intent == "house_recommend":
-            base = "我先按预算、区域、通勤和签约风险一起看。"
+            answer = synthesize_house_recommendation(state)
         elif intent == "contract_risk":
-            base = "我先按合同、押金和沟通证据风险一起看。"
-        answer = "\n".join([base, *[f"- {line}" for line in expert_summaries]])
-        if expert_summaries:
-            answer += "\n下一步建议：选中具体房源后发起预约或意向，提交前再确认押金、付款周期、维修责任和提前退租条款。"
+            answer = synthesize_contract_risk(state)
+        elif is_nearby_query(str(state.get("message") or "").lower()):
+            answer = synthesize_nearby_answer(state)
+        else:
+            answer = synthesize_context_answer(state)
     state["answer"] = answer or "我已完成本轮分析。"
     state["next_actions"] = build_next_actions(intent)
     state["suggestions"] = None
     state["house_ids"] = collect_house_ids(state)
     return state
+
+
+def synthesize_house_recommendation(state: TenantAgentState) -> str:
+    matches = extract_house_matches(state)
+    slots = (state.get("route") or {}).get("slots") or {}
+    city = slots.get("city")
+    max_rent = as_int(slots.get("maxRent"))
+    target = "、".join(str(item) for item in [city, f"{max_rent}元以内" if max_rent else None] if item)
+    if not matches:
+        return f"我查了{target or '当前条件'}，暂时没有查到符合条件的公开房源。"
+
+    lines = [f"查到了，{target or '当前条件'}下有 {len(matches)} 套可看的公开房源："]
+    for index, item in enumerate(matches[:5], start=1):
+        lines.append(f"{index}. {format_house_line(item)}")
+    return "\n".join(lines)
+
+
+def synthesize_nearby_answer(state: TenantAgentState) -> str:
+    selected = (state.get("context") or {}).get("selected") or {}
+    slots = (state.get("route") or {}).get("slots") or {}
+    focus = slots.get("nearbyFocus")
+    label = {"education": "学校/教育资源", "transport": "交通", "medical": "医疗", "life": "生活配套"}.get(focus, "周边配套")
+    evidence = extract_map_evidence(state)
+    title = selected.get("title") or (f"房源 {selected.get('houseId')}" if selected.get("houseId") else "当前房源")
+    groups = evidence.get("totals") or {}
+    labels = focus_group_labels(focus)
+    lines = [f"我查了{title}周围的{label}。"]
+    found = False
+    for group_label in labels:
+        item = groups.get(group_label) or {}
+        nearest = item.get("nearest")
+        count = int(item.get("count") or 0)
+        if nearest:
+            found = True
+            lines.append(f"{group_label}：查到 {count} 个点位，最近的是 {nearest.get('name')}，约 {nearest.get('distance')} 米。")
+            top_pois = [poi for poi in item.get("topPois") or [] if poi.get("name")][:3]
+            if top_pois:
+                lines.append("可重点看：" + "、".join(format_poi(item) for item in top_pois))
+        elif count:
+            found = True
+            lines.append(f"{group_label}：查到 {count} 个点位，但工具没有返回最近点名称。")
+
+    if not found:
+        reason = evidence.get("summary") or "周边工具没有返回相关点位"
+        return f"我查了{title}周围的{label}，目前没有拿到可用的{label}数据。{reason}。"
+    return "\n".join(lines)
+
+
+def synthesize_contract_risk(state: TenantAgentState) -> str:
+    risks = []
+    for expert in (state.get("collaboration") or {}).get("experts", []):
+        if expert.get("name") == "risk_analysis_specialist":
+            risks.extend((expert.get("output") or {}).get("risks") or [])
+    if not risks:
+        return "当前没有读取到具体合同风险字段。请选中合同后，我可以继续核对租期、押金、付款周期、维修责任和提前退租条款。"
+    return "这次先看合同风险，建议重点确认：\n" + "\n".join(f"- {item}" for item in risks[:5])
+
+
+def synthesize_context_answer(state: TenantAgentState) -> str:
+    nearby = synthesize_nearby_answer(state) if is_nearby_query(str(state.get("message") or "").lower()) else ""
+    if nearby:
+        return nearby
+    summaries = [
+        item.get("summary")
+        for item in (state.get("collaboration") or {}).get("experts", [])
+        if item.get("summary")
+    ]
+    return "这次没有拿到可用于回答的业务结果。"
+
+
+def extract_house_matches(state: TenantAgentState) -> list[dict[str, Any]]:
+    matches = []
+    for call in state.get("tool_calls", []):
+        if call.get("name") not in {"search_houses", "search_public_houses"}:
+            continue
+        output = call.get("output") or {}
+        for key in ["matches", "rows", "items"]:
+            for item in output.get(key) or []:
+                if isinstance(item, dict):
+                    matches.append(item)
+    return matches
+
+
+def extract_map_evidence(state: TenantAgentState) -> dict[str, Any]:
+    for expert in (state.get("collaboration") or {}).get("experts", []):
+        if expert.get("name") == "map_life_specialist":
+            analysis = (expert.get("output") or {}).get("analysis") or {}
+            evidence = analysis.get("evidence") or {}
+            if evidence:
+                return evidence
+            return compact_map_evidence(expert.get("output") or {})
+    for call in state.get("tool_calls", []):
+        if str(call.get("name") or "").startswith("amap_"):
+            return compact_map_evidence(call.get("output") or {})
+    return {}
+
+
+def format_house_line(item: dict[str, Any]) -> str:
+    title = item.get("title") or item.get("houseTitle") or f"房源 {item.get('houseId') or '-'}"
+    place = " ".join(str(part) for part in [item.get("city"), item.get("district"), item.get("community")] if part)
+    rent = f"{item.get('rentAmount')}元/月" if item.get("rentAmount") else "租金待确认"
+    area = f"{item.get('area')}㎡" if item.get("area") else ""
+    house_id = f"#{item.get('houseId')} " if item.get("houseId") else ""
+    tail = "，".join(part for part in [place, rent, area] if part)
+    return f"{house_id}{title}" + (f"，{tail}" if tail else "")
+
+
+def format_poi(item: dict[str, Any]) -> str:
+    distance = f"约{item.get('distance')}米" if item.get("distance") not in (None, "") else "距离未返回"
+    return f"{item.get('name')}（{distance}）"
 
 
 def persist_memory(state: TenantAgentState) -> TenantAgentState:

@@ -5,15 +5,17 @@ from typing import Any
 
 
 def score_house(house: dict[str, Any], query: str, city: str | None, max_rent: int | None) -> int:
+    normalized_query = normalize_house_query(query)
     content = " ".join(
         str(house.get(key) or "")
         for key in ["title", "city", "district", "community", "address", "tags", "description", "content"]
     ).lower()
     score = 0
-    for token in tokenize(query):
+    for token in tokenize(normalized_query):
         if token and token in content:
             score += 3
-    if city and city in str(house.get("city") or ""):
+    house_city = str(house.get("city") or "")
+    if city and (city in house_city or city.removesuffix("市") in house_city):
         score += 8
     rent = as_int(house.get("rentAmount"))
     if max_rent and rent:
@@ -47,6 +49,13 @@ def tokenize(text: str) -> list[str]:
     return tokens
 
 
+def normalize_house_query(text: str) -> str:
+    normalized = text or ""
+    for word in ["有没有", "有房源吗", "有房吗", "房源", "推荐", "找房", "可租", "吗", "？", "?"]:
+        normalized = normalized.replace(word, "")
+    return normalized.strip()
+
+
 def extract_budget(text: str) -> int | None:
     matches = re.findall(r"(\d{3,6})\s*(?:元|块|以内|以下|预算)?", text or "")
     if not matches:
@@ -56,8 +65,24 @@ def extract_budget(text: str) -> int | None:
 
 
 def extract_city(text: str) -> str | None:
-    for city in ["北京", "上海", "广州", "深圳", "杭州", "南京", "成都", "武汉", "西安", "天津", "重庆", "苏州"]:
-        if city in (text or ""):
+    aliases = {
+        "北京": "北京",
+        "上海": "上海",
+        "广州": "广州",
+        "深圳": "深圳",
+        "杭州": "杭州",
+        "南京": "南京",
+        "成都": "成都",
+        "武汉": "武汉",
+        "西安": "西安",
+        "天津": "天津",
+        "重庆": "重庆",
+        "苏州": "苏州",
+        "延安": "延安市",
+        "延安市": "延安市",
+    }
+    for alias, city in aliases.items():
+        if alias in (text or ""):
             return city
     return None
 

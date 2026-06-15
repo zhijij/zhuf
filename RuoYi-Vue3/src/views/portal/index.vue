@@ -216,6 +216,7 @@
             <section v-if="workMode === 'tenant' && isTenantHouseContext(selected)" class="operation-card">
               <h3>租户事务</h3>
               <div class="panel-actions">
+                <el-button type="primary" icon="ChatLineRound" @click="contactHouseResponsibleFromSelected">联系负责人</el-button>
                 <el-button type="primary" @click="openTransaction('tenantAppointment')">预约看房</el-button>
                 <el-button plain @click="openTransaction('tenantIntention')">提交意向</el-button>
                 <el-button plain @click="openTransaction('tenantDeal')">成交申请</el-button>
@@ -346,6 +347,38 @@
 
     <main v-else class="agent-home">
       <section class="agent-workspace">
+        <aside class="agent-conversation-panel">
+          <div class="agent-conversation-head">
+            <div>
+              <span>会话记忆</span>
+              <h2>AI 对话</h2>
+            </div>
+            <el-button circle plain :icon="Plus" :loading="conversationLoading" @click="startNewAiConversation" />
+          </div>
+
+          <div v-loading="conversationLoading" class="agent-conversation-list">
+            <button
+              v-for="item in aiConversations"
+              :key="item.conversationId"
+              class="conversation-item"
+              :class="{ active: item.conversationId === activeConversationId }"
+              @click="selectAiConversation(item.conversationId)"
+            >
+              <strong>{{ item.title || '新对话' }}</strong>
+              <span>{{ item.lastMessage || '还没有消息' }}</span>
+              <small>{{ conversationTime(item) }}</small>
+              <el-button
+                class="conversation-delete"
+                text
+                circle
+                :icon="Delete"
+                @click.stop="removeAiConversation(item)"
+              />
+            </button>
+            <el-empty v-if="!conversationLoading && !aiConversations.length" description="暂无会话" :image-size="72" />
+          </div>
+        </aside>
+
         <aside class="agent-record-panel">
           <div class="agent-record-head">
             <div>
@@ -630,7 +663,7 @@
             </el-form-item>
           </div>
           <el-form-item label="房源图片">
-            <ImageUpload v-model="ownerHouse.imageUrls" :limit="8" />
+            <ImageUpload v-model="ownerHouse.imageUrls" action="/rental/owner/houses/images/upload" :limit="8" />
           </el-form-item>
           <el-form-item label="房源描述">
             <el-input v-model="ownerHouse.description" type="textarea" :rows="3" resize="none" placeholder="交通、装修、配套、看房时间等" />
@@ -694,8 +727,27 @@
         </template>
 
         <template v-if="transactionDialog.type === 'ownerEntrust' || transactionDialog.type === 'agentApplyEntrust'">
-          <el-form-item v-if="transactionDialog.type === 'ownerEntrust'" label="中介用户ID" required>
-            <el-input v-model="ownerEntrust.agentId" placeholder="中介用户ID" />
+          <el-form-item v-if="transactionDialog.type === 'ownerEntrust'" label="委托中介" required>
+            <el-select
+              v-model="ownerEntrust.agentId"
+              filterable
+              clearable
+              :loading="ownerAgentLoading"
+              placeholder="选择可委托中介"
+            >
+              <el-option
+                v-for="agent in ownerCandidateAgents"
+                :key="agent.userId"
+                :label="agentDisplayName(agent)"
+                :value="agent.userId"
+              >
+                <div class="agent-option">
+                  <strong>{{ agentDisplayName(agent) }}</strong>
+                  <span>{{ agent.phonenumber || agent.userName || '暂无联系方式' }}</span>
+                </div>
+              </el-option>
+            </el-select>
+            <p v-if="!ownerAgentLoading && !ownerCandidateAgents.length" class="muted-tip">暂无可委托中介，可能已存在待确认或生效中的委托。</p>
           </el-form-item>
           <el-form-item label="服务范围" required>
             <el-input
@@ -913,7 +965,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, Document, Promotion, Search } from '@element-plus/icons-vue'
+import { ArrowDown, Delete, Document, Plus, Promotion, Search } from '@element-plus/icons-vue'
 import useUserStore from '@/store/modules/user'
 import AiConsoleDrawer from './components/AiConsoleDrawer.vue'
 import FloatingAiAssistant from './components/FloatingAiAssistant.vue'
@@ -941,6 +993,7 @@ import {
   listTenantFavorites,
   favoriteTenantHouse,
   cancelTenantFavorite,
+  contactTenantHouseResponsible,
   listTenantAppointments,
   createTenantAppointment,
   cancelTenantAppointment,
@@ -955,6 +1008,7 @@ import {
   getOwnerHouse,
   createOwnerHouse,
   submitOwnerHouseAudit,
+  listOwnerCandidateAgents,
   listOwnerEntrusts,
   listOwnerEntrustApplications,
   entrustOwnerHouse,
@@ -1003,6 +1057,13 @@ import {
 } from '@/api/portal/contractBusiness'
 import {
   sendPortalAiChat,
+  listAiConversations,
+  createAiConversation,
+  getAiConversation,
+  deleteAiConversation,
+  updateAiConversationContext,
+  summarizeAiConversation,
+  sendAiConversationMessage,
   recommendRentalHouses,
   getAiCapabilities,
   createAiIndexTask,
@@ -1059,6 +1120,8 @@ let ownerPickerMap = null
 let ownerPickerMarker = null
 let ownerPickerMapProvider = ''
 const ownerEntrust = reactive({ agentId: '', entrustScope: '发布,预约,带看,签约', commissionRate: 0.02 })
+const ownerCandidateAgents = ref([])
+const ownerAgentLoading = ref(false)
 const agentApply = reactive({ entrustScope: '发布,预约,带看,签约', commissionRate: 0.02 })
 const contractOpinion = ref('')
 const actionReason = ref('')
@@ -1102,6 +1165,9 @@ const aiCapabilities = reactive({
 const agentInput = ref('')
 const agentLoading = ref(false)
 const agentMessages = ref([])
+const aiConversations = ref([])
+const activeConversationId = ref(null)
+const conversationLoading = ref(false)
 const floatingAiOpen = ref(false)
 const businessToolsOpen = ref(false)
 const floatingAiLoading = ref(false)
@@ -1150,9 +1216,10 @@ const currentRoleConfig = computed(() => roleConfig[workMode.value] || roleConfi
 const contractConfirms = computed(() => selected.value?.confirms || [])
 const roleModeOptions = computed(() => visibleWorkModes.value.map(value => ({ value, ...modeMeta[value] })))
 const canAuditSelectedHouse = computed(() => workMode.value === 'admin' && selected.value?.houseId && String(selected.value.status) === '1')
-const canManageAiIndex = computed(() => roles.value.some(role => ['owner', 'agent', 'auditor'].includes(role)))
-const canRunFullAiSync = computed(() => roles.value.includes('auditor'))
-const canOpenAiConsole = computed(() => roles.value.includes('auditor'))
+const isSystemAdmin = computed(() => roles.value.includes('admin'))
+const canManageAiIndex = computed(() => isSystemAdmin.value)
+const canRunFullAiSync = computed(() => isSystemAdmin.value)
+const canOpenAiConsole = computed(() => isSystemAdmin.value)
 const canManageContractLifecycle = computed(() => roles.value.includes('owner') || roles.value.includes('agent'))
 const canUseTenantMap = computed(() => workMode.value === 'tenant' && selected.value?.houseId && isTenantHouseContext(selected.value))
 const amapJsReady = computed(() => isAmapJsConfigured())
@@ -1186,6 +1253,7 @@ const knowledgeSourceText = computed(() => {
 })
 const previewFields = computed(() => detailFields.value.slice(0, 6))
 const nearbyGroups = computed(() => mapContext.value?.nearbyGroups || [])
+const apiBaseUrl = import.meta.env.VITE_APP_BASE_API || ''
 const hasOwnerLocation = computed(() => ownerHouse.longitude !== null && ownerHouse.longitude !== '' && ownerHouse.latitude !== null && ownerHouse.latitude !== '')
 const ownerLocationTitle = computed(() => hasOwnerLocation.value ? '已确认房源地图位置' : '请在地图弹窗中选择房源位置')
 const ownerLocationText = computed(() => {
@@ -1197,13 +1265,20 @@ const ownerLocationText = computed(() => {
 const detailImageUrls = computed(() => {
   const raw = selected.value?.imageUrls || selected.value?.images || selected.value?.imageList
   if (Array.isArray(raw)) {
-    return raw.map(item => typeof item === 'string' ? item : item?.imageUrl).filter(Boolean)
+    return raw.map(item => resolveDetailImageUrl(typeof item === 'string' ? item : item?.imageUrl || item?.url || item?.fileName)).filter(Boolean)
   }
   if (typeof raw === 'string' && raw.trim()) {
-    return raw.split(',').map(item => item.trim()).filter(Boolean)
+    return raw.split(',').map(item => resolveDetailImageUrl(item.trim())).filter(Boolean)
   }
   return []
 })
+
+function resolveDetailImageUrl(url) {
+  if (!url) return ''
+  if (/^([a-z][a-z\d+\-.]*:)?\/\//i.test(url)) return url
+  if (apiBaseUrl && url.startsWith(apiBaseUrl)) return url
+  return `${apiBaseUrl}${url.startsWith('/') ? url : `/${url}`}`
+}
 const entrustScopeModel = computed({
   get: () => transactionDialog.type === 'agentApplyEntrust' ? agentApply.entrustScope : ownerEntrust.entrustScope,
   set: value => {
@@ -1443,6 +1518,13 @@ watch(
 )
 
 watch(
+  () => [activeConversationId.value, selected.value ? recordKey(selected.value) : ''],
+  () => {
+    syncActiveConversationContext()
+  }
+)
+
+watch(
   () => [ownerHouse.city, ownerHouse.district, ownerHouse.address],
   () => {
     if (hasOwnerLocation.value) {
@@ -1487,6 +1569,9 @@ function switchPage(mode) {
   if (mode === 'agent' && agentMessages.value.length <= 1) {
     seedAgentWelcome()
   }
+  if (mode === 'agent') {
+    loadAiConversationList()
+  }
 }
 
 async function changeWorkMode(mode) {
@@ -1497,6 +1582,9 @@ async function changeWorkMode(mode) {
   }
   workMode.value = mode
   await refreshMode()
+  if (pageMode.value === 'agent') {
+    await loadAiConversationList()
+  }
 }
 
 async function showWorkMode(mode, loader) {
@@ -1693,6 +1781,11 @@ async function loadContractRecords() {
 function rowsOf(response) {
   if (Array.isArray(response)) return response
   return response?.rows || response?.data || []
+}
+
+function agentDisplayName(agent) {
+  if (!agent) return '中介'
+  return agent.nickName || agent.userName || `中介 #${agent.userId}`
 }
 
 function payloadOf(response) {
@@ -2444,6 +2537,9 @@ function openTransaction(type, row = selected.value) {
     auditForm.auditReason = '房源信息完整，租金、地址、户主信息符合发布要求。'
   } else if (type === 'adminRejectHouse') {
     auditForm.auditReason = ''
+  } else if (type === 'ownerEntrust') {
+    ownerEntrust.agentId = ''
+    loadOwnerCandidateAgentsFor(row || selected.value)
   }
   transactionDialog.visible = true
 }
@@ -2480,8 +2576,10 @@ async function submitTransaction() {
     }
     const handler = handlers[transactionDialog.type]
     if (!handler) return ElMessage.warning('当前事务暂未配置提交动作')
-    await handler()
-    transactionDialog.visible = false
+    const shouldClose = await handler()
+    if (shouldClose !== false) {
+      transactionDialog.visible = false
+    }
   } finally {
     transactionDialog.submitting = false
   }
@@ -2582,6 +2680,13 @@ async function favoriteSelectedHouse(row) {
   await refreshMode()
 }
 
+async function contactHouseResponsibleFromSelected() {
+  if (!selected.value?.houseId) return ElMessage.warning('请选择房源')
+  const res = await contactTenantHouseResponsible(selected.value.houseId)
+  ElMessage.success('已打开房源咨询')
+  openChatFromResponse(res, { title: '房源咨询' })
+}
+
 async function cancelFavoriteFromSelected() {
   if (!selected.value?.houseId) return ElMessage.warning('请选择收藏房源')
   await cancelTenantFavorite(selected.value.houseId)
@@ -2666,17 +2771,19 @@ async function loadTenantHouseDetailFromSelected() {
 
 async function createOwnerHouseFromForm() {
   if (!ownerHouse.title || !ownerHouse.city || !ownerHouse.district || !ownerHouse.address) {
-    return ElMessage.warning('请完整填写房源基础信息')
+    ElMessage.warning('请完整填写房源基础信息')
+    return false
   }
   if (!hasOwnerLocation.value) {
     ElMessage.warning('请先在地图弹窗中选择并确认房源位置')
     openOwnerLocationPicker()
-    return
+    return false
   }
   await createOwnerHouse(ownerHouse)
   ElMessage.success('房源已提交审核')
   resetOwnerHouseForm()
   await refreshMode()
+  return true
 }
 
 async function auditAdminHouse(row, auditStatus) {
@@ -2704,9 +2811,21 @@ async function loadOwnerHistory() {
   await loadWorkspaceRows(listOwnerEntrusts, item => ({ ...item, _recordType: '历史委托' }))
 }
 
+async function loadOwnerCandidateAgentsFor(row) {
+  ownerCandidateAgents.value = []
+  if (!row?.houseId) return
+  ownerAgentLoading.value = true
+  try {
+    const res = await listOwnerCandidateAgents(row.houseId)
+    ownerCandidateAgents.value = rowsOf(res)
+  } finally {
+    ownerAgentLoading.value = false
+  }
+}
+
 async function inviteAgentFromSelected(row) {
   if (!row.houseId || !ownerEntrust.agentId) {
-    return ElMessage.warning('请选择房源并填写中介用户ID')
+    return ElMessage.warning('请选择房源和委托中介')
   }
   const res = await entrustOwnerHouse(row.houseId, ownerEntrust)
   ElMessage.success('委托邀请已发送')
@@ -3007,7 +3126,7 @@ async function createAiIndexTaskFromSelected() {
 }
 
 async function createFullAiIndexTask() {
-  if (!canRunFullAiSync.value) return ElMessage.warning('只有审核员可以创建全量同步任务')
+  if (!canRunFullAiSync.value) return ElMessage.warning('只有管理员可以创建全量同步任务')
   await createAiIndexTask({ action: 'sync' })
   ElMessage.success('全量同步索引任务已创建')
   await loadAiIndexTasks()
@@ -3047,21 +3166,182 @@ async function inspectAiHouseDocumentFromSelected(options = {}) {
   }
 }
 
+async function loadAiConversationList() {
+  conversationLoading.value = true
+  try {
+    const res = await listAiConversations({ workMode: workMode.value })
+    aiConversations.value = rowsOf(res)
+    if (activeConversationId.value && !aiConversations.value.some(item => item.conversationId === activeConversationId.value)) {
+      activeConversationId.value = null
+      seedAgentWelcome()
+    }
+  } finally {
+    conversationLoading.value = false
+  }
+}
+
+async function startNewAiConversation() {
+  const conversation = await ensureAiConversation({ forceNew: true })
+  if (conversation?.conversationId) {
+    await selectAiConversation(conversation.conversationId)
+  }
+}
+
+async function ensureAiConversation(options = {}) {
+  if (!options.forceNew && activeConversationId.value) {
+    return aiConversations.value.find(item => item.conversationId === activeConversationId.value) || { conversationId: activeConversationId.value }
+  }
+  conversationLoading.value = true
+  try {
+    const res = await createAiConversation({
+      title: selected.value ? recordTitle(selected.value) : '新对话',
+      role: workMode.value,
+      workMode: workMode.value,
+      context: buildCurrentAiContext()
+    })
+    const conversation = payloadOf(res)
+    activeConversationId.value = conversation?.conversationId || null
+    seedAgentWelcome()
+    await loadAiConversationList()
+    return conversation
+  } finally {
+    conversationLoading.value = false
+  }
+}
+
+async function selectAiConversation(conversationId) {
+  if (!conversationId || conversationId === activeConversationId.value) return
+  conversationLoading.value = true
+  try {
+    const res = await getAiConversation(conversationId)
+    const conversation = payloadOf(res)
+    activeConversationId.value = conversation?.conversationId || conversationId
+    agentMessages.value = normalizeConversationMessages(conversation?.messages)
+    if (!agentMessages.value.length) {
+      seedAgentWelcome()
+    }
+  } finally {
+    conversationLoading.value = false
+  }
+}
+
+async function removeAiConversation(item) {
+  if (!item?.conversationId) return
+  try {
+    await ElMessageBox.confirm('删除后该会话不会再出现在列表中，确定删除吗？', '删除会话', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    await deleteAiConversation(item.conversationId)
+    if (activeConversationId.value === item.conversationId) {
+      activeConversationId.value = null
+      seedAgentWelcome()
+    }
+    await loadAiConversationList()
+  } catch (error) {
+    // 用户取消删除时保持当前会话。
+  }
+}
+
+async function syncActiveConversationContext() {
+  if (pageMode.value !== 'agent' || !activeConversationId.value || !selected.value) return
+  try {
+    await updateAiConversationContext(activeConversationId.value, buildCurrentAiContext())
+  } catch (error) {
+    // 上下文同步失败不打断用户继续切换记录或输入。
+  }
+}
+
+function buildCurrentAiContext() {
+  return {
+    pageMode: pageMode.value,
+    workMode: workMode.value,
+    selected: selected.value ? buildAiRecordContext(selected.value) : null,
+    filters: { ...filters },
+    mapContext: mapContext.value ? { ...mapContext.value } : null,
+    visibleActions: visibleActions.value.map(item => ({ key: item.key, label: item.label })),
+    summary: { ...workspaceSummary }
+  }
+}
+
+function normalizeConversationMessages(messages = []) {
+  return messages
+    .filter(item => ['user', 'assistant'].includes(item.role))
+    .map(item => ({
+      role: item.role,
+      content: item.content || '',
+      intent: item.intent,
+      intentLabel: item.intentLabel,
+      toolCalls: parseMaybeJson(item.toolCalls) || [],
+      collaboration: parseMaybeJson(item.collaboration),
+      contextSnapshot: parseMaybeJson(item.contextSnapshot)
+    }))
+}
+
+function parseMaybeJson(value) {
+  if (!value || typeof value !== 'string') return value
+  try {
+    return JSON.parse(value)
+  } catch (error) {
+    return value
+  }
+}
+
+function conversationTime(item) {
+  const value = item?.lastMessageTime || item?.updateTime || item?.createTime
+  if (!value) return ''
+  const date = new Date(String(value).replace(/-/g, '/'))
+  if (Number.isNaN(date.getTime())) return ''
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  const hour = `${date.getHours()}`.padStart(2, '0')
+  const minute = `${date.getMinutes()}`.padStart(2, '0')
+  return `${month}-${day} ${hour}:${minute}`
+}
+
 async function sendAgentMessage() {
   const content = agentInput.value.trim()
   if (!content) return
-  agentMessages.value.push({ role: 'user', content })
+  const conversation = await ensureAiConversation()
+  if (!conversation?.conversationId) return
+  const localUserMessage = { role: 'user', content }
+  agentMessages.value.push(localUserMessage)
   agentInput.value = ''
   agentLoading.value = true
   try {
-    const res = await sendPortalAiChat(buildAiRequest(content))
-    agentMessages.value.push(normalizeAiMessage(res))
+    const res = await sendAiConversationMessage(conversation.conversationId, buildAiRequest(content))
+    const data = payloadOf(res)
+    if (data?.conversation?.messages?.length) {
+      agentMessages.value = normalizeConversationMessages(data.conversation.messages)
+    } else if (data?.assistantMessage) {
+      agentMessages.value.push(normalizeStoredAiMessage(data.assistantMessage, data.assistant))
+    } else {
+      agentMessages.value.push(normalizeAiMessage(data?.assistant || data))
+    }
+    summarizeAiConversation(conversation.conversationId).catch(() => {})
+    await loadAiConversationList()
   } catch (error) {
-    agentMessages.value.push({ role: 'assistant', content: '智能体服务暂时没有返回结果，请稍后重试或切换到业务页继续处理当前流程。' })
+    agentMessages.value.push({ role: 'assistant', content: '智能体服务暂不可用，请稍后再试。' })
   } finally {
     agentLoading.value = false
   }
 }
+
+function normalizeStoredAiMessage(message, assistantPayload) {
+  const aiResult = assistantPayload ? normalizeAiResponse(assistantPayload) : null
+  return {
+    role: 'assistant',
+    content: message?.content || aiResult?.answer || '智能体接口已收到请求。',
+    intent: message?.intent || aiResult?.intent,
+    intentLabel: message?.intentLabel || aiResult?.intentLabel,
+    toolCalls: parseMaybeJson(message?.toolCalls) || aiResult?.toolCalls || [],
+    collaboration: parseMaybeJson(message?.collaboration) || aiResult?.collaboration,
+    suggestions: aiResult?.suggestions,
+    nextActions: aiResult?.nextActions || []
+  }
+}
+
 
 function openFloatingAi() {
   floatingAiOpen.value = true
@@ -4345,7 +4625,7 @@ function collaborationSummary(collaboration) {
 
 .agent-workspace {
   display: grid;
-  grid-template-columns: 420px minmax(0, 1fr);
+  grid-template-columns: 280px 400px minmax(0, 1fr);
   gap: 18px;
   width: min(1480px, calc(100vw - 48px));
   min-height: calc(100vh - 112px);
@@ -4353,6 +4633,7 @@ function collaborationSummary(collaboration) {
   padding: 24px 0 36px;
 }
 
+.agent-conversation-panel,
 .agent-record-panel {
   display: flex;
   flex-direction: column;
@@ -4364,6 +4645,7 @@ function collaborationSummary(collaboration) {
   box-shadow: 0 18px 54px rgba(60, 64, 67, 0.08);
 }
 
+.agent-conversation-head,
 .agent-record-head {
   display: flex;
   align-items: flex-start;
@@ -4372,6 +4654,7 @@ function collaborationSummary(collaboration) {
   margin-bottom: 14px;
 }
 
+.agent-conversation-head span,
 .agent-record-head span,
 .agent-context-main span {
   display: block;
@@ -4381,11 +4664,63 @@ function collaborationSummary(collaboration) {
   font-weight: 700;
 }
 
+.agent-conversation-head h2,
 .agent-record-head h2,
 .agent-context-main h2 {
   margin: 0;
   color: var(--portal-ink);
   font-size: 18px;
+}
+
+.agent-conversation-list {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.conversation-item {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  min-height: 86px;
+  padding: 12px 40px 12px 12px;
+  color: var(--portal-ink);
+  text-align: left;
+  cursor: pointer;
+  background: #ffffff;
+  border: 1px solid var(--portal-line);
+  border-radius: 18px;
+}
+
+.conversation-item.active {
+  background: var(--portal-primary-strong);
+  border-color: rgba(11, 87, 208, 0.28);
+}
+
+.conversation-item strong,
+.conversation-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-item strong {
+  font-size: 14px;
+}
+
+.conversation-item span,
+.conversation-item small {
+  color: var(--portal-muted);
+  font-size: 12px;
+}
+
+.conversation-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
 }
 
 .agent-record-head em {
@@ -4638,6 +4973,7 @@ function collaborationSummary(collaboration) {
 
   .detail-card,
   .result-list,
+  .agent-conversation-panel,
   .agent-record-panel {
     min-height: auto;
   }
@@ -4675,8 +5011,13 @@ function collaborationSummary(collaboration) {
     padding: 0;
   }
 
+  .agent-conversation-panel,
   .agent-record-panel {
     padding: 14px;
+  }
+
+  .agent-conversation-list {
+    max-height: 320px;
   }
 
   .agent-hero {

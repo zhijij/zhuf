@@ -37,7 +37,7 @@ public class AiUserMemoryController extends BaseController
     /**
      * 查询AI用户记忆列表
      */
-    @PreAuthorize("@ss.hasPermi('system:memory:list')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:memory:list')")
     @GetMapping("/list")
     public TableDataInfo list(AiUserMemory aiUserMemory)
     {
@@ -49,7 +49,7 @@ public class AiUserMemoryController extends BaseController
     /**
      * 导出AI用户记忆列表
      */
-    @PreAuthorize("@ss.hasPermi('system:memory:export')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:memory:export')")
     @Log(title = "AI用户记忆", businessType = BusinessType.EXPORT)
     @PostMapping("/export")
     public void export(HttpServletResponse response, AiUserMemory aiUserMemory)
@@ -62,7 +62,7 @@ public class AiUserMemoryController extends BaseController
     /**
      * 获取AI用户记忆详细信息
      */
-    @PreAuthorize("@ss.hasPermi('system:memory:query')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:memory:query')")
     @GetMapping(value = "/{memoryId}")
     public AjaxResult getInfo(@PathVariable("memoryId") Long memoryId)
     {
@@ -72,7 +72,7 @@ public class AiUserMemoryController extends BaseController
     /**
      * 新增AI用户记忆
      */
-    @PreAuthorize("@ss.hasPermi('system:memory:add')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:memory:add')")
     @Log(title = "AI用户记忆", businessType = BusinessType.INSERT)
     @PostMapping
     public AjaxResult add(@RequestBody AiUserMemory aiUserMemory)
@@ -83,7 +83,7 @@ public class AiUserMemoryController extends BaseController
     /**
      * 修改AI用户记忆
      */
-    @PreAuthorize("@ss.hasPermi('system:memory:edit')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:memory:edit')")
     @Log(title = "AI用户记忆", businessType = BusinessType.UPDATE)
     @PutMapping
     public AjaxResult edit(@RequestBody AiUserMemory aiUserMemory)
@@ -94,7 +94,7 @@ public class AiUserMemoryController extends BaseController
     /**
      * 删除AI用户记忆
      */
-    @PreAuthorize("@ss.hasPermi('system:memory:remove')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:memory:remove')")
     @Log(title = "AI用户记忆", businessType = BusinessType.DELETE)
 	@DeleteMapping("/{memoryIds}")
     public AjaxResult remove(@PathVariable Long[] memoryIds)

@@ -58,4 +58,12 @@ public interface IRentalHouseImageService
      * @return 结果
      */
     public int deleteRentalHouseImageByImageId(Long imageId);
+
+    /**
+     * 删除某个房源的全部图片
+     *
+     * @param houseId 房源ID
+     * @return 结果
+     */
+    public int deleteRentalHouseImageByHouseId(Long houseId);
 }

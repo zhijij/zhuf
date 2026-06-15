@@ -16,8 +16,10 @@ import com.ruoyi.system.domain.BizChatSession;
 import com.ruoyi.system.domain.BizChatSessionUser;
 import com.ruoyi.system.domain.RentalAppointment;
 import com.ruoyi.system.domain.RentalContract;
+import com.ruoyi.system.domain.RentalHouse;
 import com.ruoyi.system.domain.RentalHouseEntrust;
 import com.ruoyi.system.domain.RentalIntention;
+import com.ruoyi.system.enums.RentalOperationMode;
 import com.ruoyi.system.mapper.BizChatMessageMapper;
 import com.ruoyi.system.mapper.BizChatSessionMapper;
 import com.ruoyi.system.mapper.BizChatSessionUserMapper;
@@ -25,6 +27,7 @@ import com.ruoyi.system.service.IBizChatService;
 import com.ruoyi.system.service.IRentalAppointmentService;
 import com.ruoyi.system.service.IRentalContractService;
 import com.ruoyi.system.service.IRentalHouseEntrustService;
+import com.ruoyi.system.service.IRentalHouseService;
 import com.ruoyi.system.service.IRentalIntentionService;
 
 @Service
@@ -34,6 +37,7 @@ public class BizChatServiceImpl implements IBizChatService
     private static final String BIZ_APPOINTMENT = "appointment";
     private static final String BIZ_INTENTION = "intention";
     private static final String BIZ_CONTRACT = "contract";
+    private static final String BIZ_HOUSE_PREFIX = "house:";
 
     @Autowired
     private BizChatSessionMapper bizChatSessionMapper;
@@ -46,6 +50,9 @@ public class BizChatServiceImpl implements IBizChatService
 
     @Autowired
     private IRentalHouseEntrustService rentalHouseEntrustService;
+
+    @Autowired
+    private IRentalHouseService rentalHouseService;
 
     @Autowired
     private IRentalAppointmentService rentalAppointmentService;
@@ -246,6 +253,24 @@ public class BizChatServiceImpl implements IBizChatService
                     .add(entrust.getOwnerId(), "owner")
                     .add(entrust.getAgentId(), "agent");
         }
+        if (bizType.startsWith(BIZ_HOUSE_PREFIX))
+        {
+            Long tenantId = parseHouseTenantId(bizType);
+            RentalHouse house = rentalHouseService.selectRentalHouseDetail(bizId, SecurityUtils.getUserId(), false);
+            if (house == null)
+            {
+                throw new ServiceException("房源不存在");
+            }
+            Long responsibleAgentId = RentalOperationMode.AGENT_ENTRUST.code().equals(house.getOperationMode())
+                    ? house.getAgentId() : null;
+            ChatBizParticipants participants = new ChatBizParticipants("房源咨询")
+                    .add(tenantId, "tenant");
+            if (responsibleAgentId != null)
+            {
+                return participants.add(responsibleAgentId, "agent");
+            }
+            return participants.add(house.getOwnerId(), "owner");
+        }
         if (BIZ_APPOINTMENT.equals(bizType))
         {
             RentalAppointment appointment = rentalAppointmentService.selectRentalAppointmentByAppointmentId(bizId);
@@ -283,6 +308,19 @@ public class BizChatServiceImpl implements IBizChatService
                     .add(contract.getAgentId(), "agent");
         }
         throw new ServiceException("不支持的业务聊天类型");
+    }
+
+    private Long parseHouseTenantId(String bizType)
+    {
+        String tenantIdText = bizType.substring(BIZ_HOUSE_PREFIX.length());
+        try
+        {
+            return Long.valueOf(tenantIdText);
+        }
+        catch (NumberFormatException e)
+        {
+            throw new ServiceException("房源咨询会话标识无效");
+        }
     }
 
     private static class ChatBizParticipants

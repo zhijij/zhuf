@@ -10,6 +10,7 @@ import com.ruoyi.system.mapper.RentalAppointmentMapper;
 import com.ruoyi.system.domain.RentalAppointment;
 import com.ruoyi.system.domain.RentalHouse;
 import com.ruoyi.system.enums.RentalAppointmentStatus;
+import com.ruoyi.system.enums.RentalOperationMode;
 import com.ruoyi.system.service.IRentalAppointmentService;
 import com.ruoyi.system.service.IRentalHouseService;
 
@@ -82,7 +83,7 @@ public class RentalAppointmentServiceImpl implements IRentalAppointmentService
 
         rentalAppointment.setTenantId(tenantId);
         rentalAppointment.setOwnerId(house.getOwnerId());
-        rentalAppointment.setAgentId(house.getAgentId());
+        rentalAppointment.setAgentId(effectiveAgentId(house));
         rentalAppointment.setStatus(RentalAppointmentStatus.PENDING.code());
         if (rentalAppointment.getSource() == null)
         {
@@ -204,6 +205,12 @@ public class RentalAppointmentServiceImpl implements IRentalAppointmentService
                 throw new ServiceException("该房源已有待处理预约，请勿重复预约");
             }
         }
+    }
+
+    private Long effectiveAgentId(RentalHouse house)
+    {
+        return house != null && RentalOperationMode.AGENT_ENTRUST.code().equals(house.getOperationMode())
+                ? house.getAgentId() : null;
     }
 
     private RentalAppointment requireAppointment(Long appointmentId)

@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.ruoyi.system.domain.AiVectorIndexTask;
 import com.ruoyi.system.domain.RentalContract;
 import com.ruoyi.system.mapper.RentalHouseMapper;
+import com.ruoyi.system.mapper.SysUserMapper;
 import com.ruoyi.system.domain.RentalHouse;
 import com.ruoyi.system.domain.RentalHouseEntrust;
 import com.ruoyi.system.domain.RentalHouseImage;
@@ -41,6 +42,9 @@ public class RentalHouseServiceImpl implements IRentalHouseService
     private RentalHouseMapper rentalHouseMapper;
 
     @Autowired
+    private SysUserMapper sysUserMapper;
+
+    @Autowired
     private IRentalHouseEntrustService rentalHouseEntrustService;
 
     @Autowired
@@ -61,7 +65,9 @@ public class RentalHouseServiceImpl implements IRentalHouseService
     @Override
     public RentalHouse selectRentalHouseByHouseId(Long houseId)
     {
-        return rentalHouseMapper.selectRentalHouseByHouseId(houseId);
+        RentalHouse house = rentalHouseMapper.selectRentalHouseByHouseId(houseId);
+        fillHouseImages(house);
+        return house;
     }
 
     /**
@@ -73,7 +79,9 @@ public class RentalHouseServiceImpl implements IRentalHouseService
     @Override
     public List<RentalHouse> selectRentalHouseList(RentalHouse rentalHouse)
     {
-        return rentalHouseMapper.selectRentalHouseList(rentalHouse);
+        List<RentalHouse> list = rentalHouseMapper.selectRentalHouseList(rentalHouse);
+        fillHouseImages(list);
+        return list;
     }
 
     @Override
@@ -85,9 +93,11 @@ public class RentalHouseServiceImpl implements IRentalHouseService
         }
         rentalHouse.setStatus(RentalHouseStatus.PUBLISHED.code());
         rentalHouse.setAuditStatus(RentalAuditStatus.PASSED.code());
-        return rentalHouseMapper.selectRentalHouseList(rentalHouse).stream()
+        List<RentalHouse> list = rentalHouseMapper.selectRentalHouseList(rentalHouse).stream()
                 .filter(this::isTenantVisiblePublishedHouse)
                 .collect(Collectors.toList());
+        fillHouseImages(list);
+        return list;
     }
 
     @Override
@@ -99,7 +109,9 @@ public class RentalHouseServiceImpl implements IRentalHouseService
         }
         rentalHouse.setStatus(RentalHouseStatus.PENDING_AUDIT.code());
         rentalHouse.setAuditStatus(RentalAuditStatus.PENDING.code());
-        return rentalHouseMapper.selectRentalHouseList(rentalHouse);
+        List<RentalHouse> list = rentalHouseMapper.selectRentalHouseList(rentalHouse);
+        fillHouseImages(list);
+        return list;
     }
 
     @Override
@@ -125,7 +137,12 @@ public class RentalHouseServiceImpl implements IRentalHouseService
     public int insertRentalHouse(RentalHouse rentalHouse)
     {
         rentalHouse.setCreateTime(DateUtils.getNowDate());
-        return rentalHouseMapper.insertRentalHouse(rentalHouse);
+        int rows = rentalHouseMapper.insertRentalHouse(rentalHouse);
+        if (rows > 0)
+        {
+            syncHouseImages(rentalHouse);
+        }
+        return rows;
     }
 
     @Override
@@ -136,9 +153,7 @@ public class RentalHouseServiceImpl implements IRentalHouseService
         rentalHouse.setStatus(RentalHouseStatus.PENDING_AUDIT.code());
         rentalHouse.setAuditStatus(RentalAuditStatus.PENDING.code());
         rentalHouse.setAuditReason(null);
-        int rows = insertRentalHouse(rentalHouse);
-        saveHouseImages(rentalHouse);
-        return rows;
+        return insertRentalHouse(rentalHouse);
     }
 
     /**
@@ -151,7 +166,12 @@ public class RentalHouseServiceImpl implements IRentalHouseService
     public int updateRentalHouse(RentalHouse rentalHouse)
     {
         rentalHouse.setUpdateTime(DateUtils.getNowDate());
-        return rentalHouseMapper.updateRentalHouse(rentalHouse);
+        int rows = rentalHouseMapper.updateRentalHouse(rentalHouse);
+        if (rows > 0 && rentalHouse.getImageUrls() != null)
+        {
+            syncHouseImages(rentalHouse);
+        }
+        return rows;
     }
 
     @Override
@@ -305,6 +325,14 @@ public class RentalHouseServiceImpl implements IRentalHouseService
         {
             throw new ServiceException("请选择中介用户");
         }
+        if (!isAgentUser(entrust.getAgentId()))
+        {
+            throw new ServiceException("请选择有效的中介用户");
+        }
+        if (hasPendingOrActiveEntrust(houseId, entrust.getAgentId()))
+        {
+            throw new ServiceException("该中介已有待确认或生效中的委托");
+        }
 
         entrust.setHouseId(houseId);
         entrust.setOwnerId(house.getOwnerId());
@@ -385,8 +413,15 @@ public class RentalHouseServiceImpl implements IRentalHouseService
      * @return 结果
      */
     @Override
+    @Transactional
     public int deleteRentalHouseByHouseIds(Long[] houseIds)
     {
+        if (houseIds != null)
+        {
+            Arrays.stream(houseIds)
+                    .filter(id -> id != null)
+                    .forEach(rentalHouseImageService::deleteRentalHouseImageByHouseId);
+        }
         return rentalHouseMapper.deleteRentalHouseByHouseIds(houseIds);
     }
 
@@ -397,8 +432,10 @@ public class RentalHouseServiceImpl implements IRentalHouseService
      * @return 结果
      */
     @Override
+    @Transactional
     public int deleteRentalHouseByHouseId(Long houseId)
     {
+        rentalHouseImageService.deleteRentalHouseImageByHouseId(houseId);
         return rentalHouseMapper.deleteRentalHouseByHouseId(houseId);
     }
 
@@ -442,14 +479,20 @@ public class RentalHouseServiceImpl implements IRentalHouseService
         return house;
     }
 
-    private void saveHouseImages(RentalHouse house)
+    private void syncHouseImages(RentalHouse house)
     {
-        if (house == null || house.getHouseId() == null || StringUtils.isEmpty(house.getImageUrls()))
+        if (house == null || house.getHouseId() == null)
+        {
+            return;
+        }
+        rentalHouseImageService.deleteRentalHouseImageByHouseId(house.getHouseId());
+        if (StringUtils.isEmpty(house.getImageUrls()))
         {
             return;
         }
         List<String> urls = Arrays.stream(house.getImageUrls().split(","))
                 .map(String::trim)
+                .distinct()
                 .filter(StringUtils::isNotEmpty)
                 .collect(Collectors.toList());
         for (int index = 0; index < urls.size(); index++)
@@ -461,6 +504,15 @@ public class RentalHouseServiceImpl implements IRentalHouseService
             image.setSortNo((long) index);
             rentalHouseImageService.insertRentalHouseImage(image);
         }
+    }
+
+    private void fillHouseImages(List<RentalHouse> houses)
+    {
+        if (houses == null || houses.isEmpty())
+        {
+            return;
+        }
+        houses.forEach(this::fillHouseImages);
     }
 
     private void fillHouseImages(RentalHouse house)
@@ -533,7 +585,7 @@ public class RentalHouseServiceImpl implements IRentalHouseService
         contract.setHouseId(house.getHouseId());
         contract.setTenantId(request.getTenantId());
         contract.setOwnerId(house.getOwnerId());
-        contract.setAgentId(house.getAgentId());
+        contract.setAgentId(effectiveAgentId(house));
         contract.setContractNo(StringUtils.isEmpty(request.getContractNo()) ? defaultContractNo(house.getHouseId()) : request.getContractNo());
         contract.setStartDate(request.getStartDate());
         contract.setEndDate(request.getEndDate());
@@ -544,6 +596,28 @@ public class RentalHouseServiceImpl implements IRentalHouseService
         contract.setStatus("1");
         // TODO 合同层完善：合同编号规则、电子签章、租期合法性、租金押金校验、交付验收单。
         return contract;
+    }
+
+    private Long effectiveAgentId(RentalHouse house)
+    {
+        return house != null && RentalOperationMode.AGENT_ENTRUST.code().equals(house.getOperationMode())
+                ? house.getAgentId() : null;
+    }
+
+    private boolean isAgentUser(Long agentId)
+    {
+        return agentId != null && sysUserMapper.selectUsersByRoleKey("agent").stream()
+                .anyMatch(user -> agentId.equals(user.getUserId()));
+    }
+
+    private boolean hasPendingOrActiveEntrust(Long houseId, Long agentId)
+    {
+        RentalHouseEntrust query = new RentalHouseEntrust();
+        query.setHouseId(houseId);
+        query.setAgentId(agentId);
+        return rentalHouseEntrustService.selectRentalHouseEntrustList(query).stream()
+                .anyMatch(entrust -> RentalEntrustStatus.PENDING.code().equals(entrust.getStatus())
+                        || RentalEntrustStatus.ACTIVE.code().equals(entrust.getStatus()));
     }
 
     private void enqueueHouseIndexTask(Long houseId, String action, String message)

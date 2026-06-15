@@ -24,6 +24,15 @@ export function geocodeOwnerHouse(query) {
   })
 }
 
+export function uploadOwnerHouseImage(data) {
+  return request({
+    url: '/rental/owner/houses/images/upload',
+    method: 'post',
+    data,
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+}
+
 export function getOwnerHouse(houseId) {
   return request({
     url: `/rental/owner/houses/${houseId}`,
@@ -35,6 +44,13 @@ export function submitOwnerHouseAudit(houseId) {
   return request({
     url: `/rental/owner/houses/${houseId}/submit-audit`,
     method: 'post'
+  })
+}
+
+export function listOwnerCandidateAgents(houseId) {
+  return request({
+    url: `/rental/owner/houses/${houseId}/candidate-agents`,
+    method: 'get'
   })
 }
 

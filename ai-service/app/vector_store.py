@@ -275,6 +275,7 @@ def search_vector_houses(query: str, city: str | None, max_rent: int | None) -> 
     if not store.DB_READY or not query.strip():
         return []
     vector = create_embedding(query)
+    city_like = f"%{city}%" if city else None
     try:
         with db_connection() as conn:
             with conn.cursor() as cur:
@@ -289,7 +290,7 @@ def search_vector_houses(query: str, city: str | None, max_rent: int | None) -> 
                         payload,
                         1 - (embedding <=> %s::vector) AS similarity
                     FROM ai_house_chunks
-                    WHERE (%s IS NULL OR city = %s)
+                    WHERE (%s IS NULL OR city ILIKE %s)
                       AND (%s IS NULL OR rent_amount IS NULL OR rent_amount <= %s)
                     ORDER BY house_id, embedding <=> %s::vector
                     LIMIT 12
@@ -298,8 +299,8 @@ def search_vector_houses(query: str, city: str | None, max_rent: int | None) -> 
                     sql,
                     (
                         vector_literal(vector),
-                        city,
-                        city,
+                        city_like,
+                        city_like,
                         max_rent,
                         max_rent,
                         vector_literal(vector),

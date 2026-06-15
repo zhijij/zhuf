@@ -37,7 +37,7 @@ public class AiToolAuditLogController extends BaseController
     /**
      * 查询AI工具调用审计列表
      */
-    @PreAuthorize("@ss.hasPermi('system:log:list')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:log:list')")
     @GetMapping("/list")
     public TableDataInfo list(AiToolAuditLog aiToolAuditLog)
     {
@@ -49,7 +49,7 @@ public class AiToolAuditLogController extends BaseController
     /**
      * 导出AI工具调用审计列表
      */
-    @PreAuthorize("@ss.hasPermi('system:log:export')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:log:export')")
     @Log(title = "AI工具调用审计", businessType = BusinessType.EXPORT)
     @PostMapping("/export")
     public void export(HttpServletResponse response, AiToolAuditLog aiToolAuditLog)
@@ -62,7 +62,7 @@ public class AiToolAuditLogController extends BaseController
     /**
      * 获取AI工具调用审计详细信息
      */
-    @PreAuthorize("@ss.hasPermi('system:log:query')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:log:query')")
     @GetMapping(value = "/{logId}")
     public AjaxResult getInfo(@PathVariable("logId") Long logId)
     {
@@ -72,7 +72,7 @@ public class AiToolAuditLogController extends BaseController
     /**
      * 新增AI工具调用审计
      */
-    @PreAuthorize("@ss.hasPermi('system:log:add')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:log:add')")
     @Log(title = "AI工具调用审计", businessType = BusinessType.INSERT)
     @PostMapping
     public AjaxResult add(@RequestBody AiToolAuditLog aiToolAuditLog)
@@ -83,7 +83,7 @@ public class AiToolAuditLogController extends BaseController
     /**
      * 修改AI工具调用审计
      */
-    @PreAuthorize("@ss.hasPermi('system:log:edit')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:log:edit')")
     @Log(title = "AI工具调用审计", businessType = BusinessType.UPDATE)
     @PutMapping
     public AjaxResult edit(@RequestBody AiToolAuditLog aiToolAuditLog)
@@ -94,7 +94,7 @@ public class AiToolAuditLogController extends BaseController
     /**
      * 删除AI工具调用审计
      */
-    @PreAuthorize("@ss.hasPermi('system:log:remove')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:log:remove')")
     @Log(title = "AI工具调用审计", businessType = BusinessType.DELETE)
 	@DeleteMapping("/{logIds}")
     public AjaxResult remove(@PathVariable Long[] logIds)

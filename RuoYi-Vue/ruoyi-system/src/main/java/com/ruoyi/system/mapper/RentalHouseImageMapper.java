@@ -52,6 +52,14 @@ public interface RentalHouseImageMapper
     public int deleteRentalHouseImageByImageId(Long imageId);
 
     /**
+     * 删除某个房源的全部图片
+     *
+     * @param houseId 房源ID
+     * @return 结果
+     */
+    public int deleteRentalHouseImageByHouseId(Long houseId);
+
+    /**
      * 批量删除房源图片
      * 
      * @param imageIds 需要删除的数据主键集合

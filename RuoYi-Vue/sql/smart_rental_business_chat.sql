@@ -32,9 +32,14 @@ WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE role_key = 'agent');
 INSERT INTO sys_role
     (role_name, role_key, role_sort, data_scope, menu_check_strictly, dept_check_strictly,
      status, del_flag, create_by, create_time, update_by, update_time, remark)
-SELECT '普通管理员/审核员', 'auditor', 6, '2', 1, 1, '0', '0', 'admin', SYSDATE(), '', NULL, '房源合规审核员角色'
+SELECT '房源审核员', 'auditor', 6, '2', 1, 1, '0', '0', 'admin', SYSDATE(), '', NULL, '房源合规审核员角色'
 FROM dual
 WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE role_key = 'auditor');
+
+UPDATE sys_role
+SET role_name = '房源审核员',
+    remark = '房源合规审核员角色'
+WHERE role_key = 'auditor';
 
 -- Demo users. Default password is admin123.
 INSERT INTO sys_user
@@ -73,7 +78,7 @@ INSERT INTO sys_user
      update_by, update_time, remark)
 SELECT 105, 'auditor_test', '房源审核员', '00', 'auditor@test.local', '15000000004', '0', '',
        '$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2',
-       '0', '0', '127.0.0.1', SYSDATE(), SYSDATE(), 'admin', SYSDATE(), '', NULL, '普通管理员/房源审核员演示账号'
+       '0', '0', '127.0.0.1', SYSDATE(), SYSDATE(), 'admin', SYSDATE(), '', NULL, '房源审核员演示账号'
 FROM dual
 WHERE NOT EXISTS (SELECT 1 FROM sys_user WHERE user_name = 'auditor_test');
 
@@ -111,6 +116,38 @@ JOIN sys_role r ON r.role_key = 'auditor'
 WHERE u.user_name = 'auditor_test'
   AND NOT EXISTS (
     SELECT 1 FROM sys_user_role ur WHERE ur.user_id = u.user_id AND ur.role_id = r.role_id
+  );
+
+DELETE rm
+FROM sys_role_menu rm
+JOIN sys_role r ON r.role_id = rm.role_id
+JOIN sys_menu m ON m.menu_id = rm.menu_id
+WHERE r.role_key = 'auditor'
+  AND (
+    m.perms LIKE 'system:doc:%'
+    OR m.perms LIKE 'system:chunk:%'
+    OR m.perms LIKE 'system:task:%'
+    OR m.perms LIKE 'system:memory:%'
+    OR m.perms LIKE 'system:session:%'
+    OR m.perms LIKE 'system:message:%'
+    OR m.perms LIKE 'system:log:%'
+  );
+
+INSERT INTO sys_role_menu (role_id, menu_id)
+SELECT r.role_id, m.menu_id
+FROM sys_role r
+JOIN sys_menu m ON (
+  m.perms LIKE 'system:doc:%'
+  OR m.perms LIKE 'system:chunk:%'
+  OR m.perms LIKE 'system:task:%'
+  OR m.perms LIKE 'system:memory:%'
+  OR m.perms LIKE 'system:session:%'
+  OR m.perms LIKE 'system:message:%'
+  OR m.perms LIKE 'system:log:%'
+)
+WHERE r.role_key = 'admin'
+  AND NOT EXISTS (
+    SELECT 1 FROM sys_role_menu rm WHERE rm.role_id = r.role_id AND rm.menu_id = m.menu_id
   );
 
 INSERT INTO sys_role_menu (role_id, menu_id)

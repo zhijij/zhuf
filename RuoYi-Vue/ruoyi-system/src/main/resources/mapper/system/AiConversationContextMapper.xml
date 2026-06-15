@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.AiConversationContextMapper">
+
+    <resultMap type="AiConversationContext" id="AiConversationContextResult">
+        <result property="contextId" column="context_id" />
+        <result property="conversationId" column="conversation_id" />
+        <result property="bizType" column="biz_type" />
+        <result property="bizId" column="biz_id" />
+        <result property="houseId" column="house_id" />
+        <result property="contractId" column="contract_id" />
+        <result property="appointmentId" column="appointment_id" />
+        <result property="intentionId" column="intention_id" />
+        <result property="entrustId" column="entrust_id" />
+        <result property="snapshotJson" column="snapshot_json" />
+        <result property="createTime" column="create_time" />
+        <result property="updateTime" column="update_time" />
+    </resultMap>
+
+    <select id="selectAiConversationContextByConversationId" parameterType="Long" resultMap="AiConversationContextResult">
+        select context_id, conversation_id, biz_type, biz_id, house_id, contract_id, appointment_id, intention_id, entrust_id, snapshot_json, create_time, update_time
+        from ai_conversation_context
+        where conversation_id = #{conversationId}
+        limit 1
+    </select>
+
+    <insert id="insertAiConversationContext" parameterType="AiConversationContext" useGeneratedKeys="true" keyProperty="contextId">
+        insert into ai_conversation_context
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="conversationId != null">conversation_id,</if>
+            <if test="bizType != null">biz_type,</if>
+            <if test="bizId != null">biz_id,</if>
+            <if test="houseId != null">house_id,</if>
+            <if test="contractId != null">contract_id,</if>
+            <if test="appointmentId != null">appointment_id,</if>
+            <if test="intentionId != null">intention_id,</if>
+            <if test="entrustId != null">entrust_id,</if>
+            <if test="snapshotJson != null">snapshot_json,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateTime != null">update_time,</if>
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="conversationId != null">#{conversationId},</if>
+            <if test="bizType != null">#{bizType},</if>
+            <if test="bizId != null">#{bizId},</if>
+            <if test="houseId != null">#{houseId},</if>
+            <if test="contractId != null">#{contractId},</if>
+            <if test="appointmentId != null">#{appointmentId},</if>
+            <if test="intentionId != null">#{intentionId},</if>
+            <if test="entrustId != null">#{entrustId},</if>
+            <if test="snapshotJson != null">#{snapshotJson},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+        </trim>
+    </insert>
+
+    <update id="updateAiConversationContext" parameterType="AiConversationContext">
+        update ai_conversation_context
+        set biz_type = #{bizType},
+            biz_id = #{bizId},
+            house_id = #{houseId},
+            contract_id = #{contractId},
+            appointment_id = #{appointmentId},
+            intention_id = #{intentionId},
+            entrust_id = #{entrustId},
+            snapshot_json = #{snapshotJson},
+            update_time = #{updateTime}
+        where context_id = #{contextId}
+    </update>
+
+    <delete id="deleteAiConversationContextByConversationId" parameterType="Long">
+        delete from ai_conversation_context where conversation_id = #{conversationId}
+    </delete>
+</mapper>

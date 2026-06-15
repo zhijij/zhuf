@@ -20,6 +20,7 @@ from app.business_rules import (
     house_brief,
     knowledge_match_line,
     knowledge_reference_lines,
+    normalize_house_query,
     normalize_source_type,
     role_context_intro,
     role_empty_answer,
@@ -667,9 +668,10 @@ def search_public_houses(
 ) -> dict[str, Any]:
     ensure_vector_store()
     query = query or state.get("message") or ""
+    normalized_query = normalize_house_query(query)
     city = city or extract_city(query) or state.get("filters", {}).get("city")
     max_rent = maxRent or extract_budget(query)
-    candidates = search_vector_houses(query, city, max_rent)
+    candidates = search_vector_houses(normalized_query or query, city, max_rent)
     if not candidates:
         candidates = list(store.HOUSE_INDEX.values())
     selected = state.get("selected") or {}
@@ -678,7 +680,7 @@ def search_public_houses(
 
     scored = []
     for house in candidates:
-        score = score_house(house, query, city, max_rent)
+        score = score_house(house, normalized_query or query, city, max_rent)
         if score > 0:
             scored.append((score, house))
     scored.sort(key=lambda item: item[0], reverse=True)

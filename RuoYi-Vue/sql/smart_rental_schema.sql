@@ -216,6 +216,73 @@ CREATE TABLE IF NOT EXISTS ai_chat_message (
   PRIMARY KEY (message_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI消息表';
 
+CREATE TABLE IF NOT EXISTS ai_conversation (
+  conversation_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '会话ID',
+  user_id BIGINT NOT NULL COMMENT '用户ID',
+  title VARCHAR(200) DEFAULT NULL COMMENT '会话标题',
+  role VARCHAR(32) DEFAULT NULL COMMENT '用户角色',
+  work_mode VARCHAR(32) DEFAULT NULL COMMENT '工作台模式',
+  summary TEXT COMMENT '记忆总结',
+  last_message VARCHAR(500) DEFAULT NULL COMMENT '最后消息摘要',
+  last_message_time DATETIME DEFAULT NULL COMMENT '最后消息时间',
+  status CHAR(1) DEFAULT '0' COMMENT '状态:0正常,1删除',
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (conversation_id),
+  KEY idx_ai_conversation_user_time (user_id, status, last_message_time),
+  KEY idx_ai_conversation_work_mode (work_mode)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI会话主表';
+
+CREATE TABLE IF NOT EXISTS ai_conversation_session (
+  session_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '运行会话ID',
+  conversation_id BIGINT NOT NULL COMMENT '会话ID',
+  session_key VARCHAR(128) NOT NULL COMMENT '运行会话Key',
+  provider VARCHAR(64) DEFAULT NULL COMMENT '模型供应商',
+  model_name VARCHAR(128) DEFAULT NULL COMMENT '模型名称',
+  status CHAR(1) DEFAULT '0' COMMENT '状态:0运行中,1已关闭',
+  started_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '开始时间',
+  ended_at DATETIME DEFAULT NULL COMMENT '结束时间',
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (session_id),
+  KEY idx_ai_conversation_session_conv (conversation_id),
+  UNIQUE KEY uk_ai_conversation_session_key (session_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI运行会话表';
+
+CREATE TABLE IF NOT EXISTS ai_conversation_message (
+  message_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '消息ID',
+  conversation_id BIGINT NOT NULL COMMENT '会话ID',
+  user_id BIGINT DEFAULT NULL COMMENT '用户ID',
+  role VARCHAR(32) NOT NULL COMMENT '角色:user/assistant/system/tool',
+  content MEDIUMTEXT COMMENT '消息内容',
+  intent VARCHAR(64) DEFAULT NULL COMMENT '智能体意图',
+  intent_label VARCHAR(128) DEFAULT NULL COMMENT '意图名称',
+  tool_calls JSON DEFAULT NULL COMMENT '工具调用',
+  collaboration JSON DEFAULT NULL COMMENT '多智能体协作',
+  context_snapshot JSON DEFAULT NULL COMMENT '上下文快照',
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (message_id),
+  KEY idx_ai_conversation_message_conv (conversation_id, message_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI会话消息表';
+
+CREATE TABLE IF NOT EXISTS ai_conversation_context (
+  context_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '上下文ID',
+  conversation_id BIGINT NOT NULL COMMENT '会话ID',
+  biz_type VARCHAR(64) DEFAULT NULL COMMENT '业务类型',
+  biz_id BIGINT DEFAULT NULL COMMENT '业务ID',
+  house_id BIGINT DEFAULT NULL COMMENT '房源ID',
+  contract_id BIGINT DEFAULT NULL COMMENT '合同ID',
+  appointment_id BIGINT DEFAULT NULL COMMENT '预约ID',
+  intention_id BIGINT DEFAULT NULL COMMENT '意向ID',
+  entrust_id BIGINT DEFAULT NULL COMMENT '委托ID',
+  snapshot_json JSON DEFAULT NULL COMMENT '上下文快照',
+  create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (context_id),
+  UNIQUE KEY uk_ai_conversation_context_conv (conversation_id),
+  KEY idx_ai_conversation_context_biz (biz_type, biz_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI会话上下文表';
+
 CREATE TABLE IF NOT EXISTS ai_user_memory (
   memory_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '记忆ID',
   user_id BIGINT NOT NULL COMMENT '用户ID',
@@ -285,13 +352,18 @@ CREATE TABLE IF NOT EXISTS ai_tool_audit_log (
   PRIMARY KEY (log_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI工具调用审计表';
 
--- 普通管理员/审核员：只负责房源合规审核，不进入超级管理员业务逻辑。
+-- 房源审核员：只负责房源合规审核，不进入 AI 配置和 AI 运维。
 INSERT INTO sys_role
     (role_name, role_key, role_sort, data_scope, menu_check_strictly, dept_check_strictly,
      status, del_flag, create_by, create_time, update_by, update_time, remark)
-SELECT '普通管理员/审核员', 'auditor', 6, '2', 1, 1, '0', '0', 'admin', SYSDATE(), '', NULL, '房源合规审核员角色'
+SELECT '房源审核员', 'auditor', 6, '2', 1, 1, '0', '0', 'admin', SYSDATE(), '', NULL, '房源合规审核员角色'
 FROM dual
 WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE role_key = 'auditor');
+
+UPDATE sys_role
+SET role_name = '房源审核员',
+    remark = '房源合规审核员角色'
+WHERE role_key = 'auditor';
 
 -- 审核员演示账号。默认密码：admin123。
 INSERT INTO sys_user
@@ -300,7 +372,7 @@ INSERT INTO sys_user
      update_by, update_time, remark)
 SELECT 105, 'auditor_test', '房源审核员', '00', 'auditor@test.local', '15000000004', '0', '',
        '$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2',
-       '0', '0', '127.0.0.1', SYSDATE(), SYSDATE(), 'admin', SYSDATE(), '', NULL, '普通管理员/房源审核员账号'
+       '0', '0', '127.0.0.1', SYSDATE(), SYSDATE(), 'admin', SYSDATE(), '', NULL, '房源审核员账号'
 FROM dual
 WHERE NOT EXISTS (SELECT 1 FROM sys_user WHERE user_name = 'auditor_test');
 
@@ -313,7 +385,7 @@ WHERE u.user_name = 'auditor_test'
     SELECT 1 FROM sys_user_role ur WHERE ur.user_id = u.user_id AND ur.role_id = r.role_id
   );
 
--- 房源合法性审核按钮权限：分配给普通管理员角色使用，超级管理员只监督不执行业务审核。
+-- 房源合法性审核按钮权限：分配给房源审核员角色使用。
 INSERT INTO sys_menu (
   menu_name, parent_id, order_num, path, component, query, route_name,
   is_frame, is_cache, menu_type, visible, status, perms, icon,
@@ -322,11 +394,43 @@ INSERT INTO sys_menu (
 SELECT
   '房源合法性审核', m.menu_id, '7', '', '', '', '',
   1, 0, 'F', '0', '0', 'system:house:audit', '#',
-  'admin', sysdate(), '', null, '普通管理员执行房源合法性审核，超级管理员仅监督'
+  'admin', sysdate(), '', null, '房源审核员执行房源合法性审核'
 FROM sys_menu m
 WHERE m.perms = 'system:house:list'
   AND NOT EXISTS (
     SELECT 1 FROM sys_menu x WHERE x.perms = 'system:house:audit'
+  );
+
+DELETE rm
+FROM sys_role_menu rm
+JOIN sys_role r ON r.role_id = rm.role_id
+JOIN sys_menu m ON m.menu_id = rm.menu_id
+WHERE r.role_key = 'auditor'
+  AND (
+    m.perms LIKE 'system:doc:%'
+    OR m.perms LIKE 'system:chunk:%'
+    OR m.perms LIKE 'system:task:%'
+    OR m.perms LIKE 'system:memory:%'
+    OR m.perms LIKE 'system:session:%'
+    OR m.perms LIKE 'system:message:%'
+    OR m.perms LIKE 'system:log:%'
+  );
+
+INSERT INTO sys_role_menu (role_id, menu_id)
+SELECT r.role_id, m.menu_id
+FROM sys_role r
+JOIN sys_menu m ON (
+  m.perms LIKE 'system:doc:%'
+  OR m.perms LIKE 'system:chunk:%'
+  OR m.perms LIKE 'system:task:%'
+  OR m.perms LIKE 'system:memory:%'
+  OR m.perms LIKE 'system:session:%'
+  OR m.perms LIKE 'system:message:%'
+  OR m.perms LIKE 'system:log:%'
+)
+WHERE r.role_key = 'admin'
+  AND NOT EXISTS (
+    SELECT 1 FROM sys_role_menu rm WHERE rm.role_id = r.role_id AND rm.menu_id = m.menu_id
   );
 
 INSERT INTO sys_role_menu (role_id, menu_id)

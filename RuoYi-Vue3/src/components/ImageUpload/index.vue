@@ -113,7 +113,20 @@ function resolveResourceUrl(url) {
   if (!url) {
     return ""
   }
+  if (url.indexOf(baseUrl) === 0) {
+    return url
+  }
   return isExternal(url) ? url : baseUrl + url
+}
+
+function normalizeModelUrl(url) {
+  if (!url) {
+    return ""
+  }
+  if (url.indexOf(baseUrl) === 0) {
+    return url.replace(baseUrl, "")
+  }
+  return isExternal(url) ? url : url.replace(baseUrl, "")
 }
 
 watch(() => props.modelValue, val => {
@@ -124,9 +137,9 @@ watch(() => props.modelValue, val => {
     fileList.value = list.map(item => {
       if (typeof item === "string") {
         if (item.indexOf(baseUrl) === -1 && !isExternal(item)) {
-          item = { name: baseUrl + item, url: baseUrl + item }
+          item = { name: item, url: resolveResourceUrl(item), responseUrl: item }
         } else {
-          item = { name: item, url: item }
+          item = { name: normalizeModelUrl(item), url: item, responseUrl: normalizeModelUrl(item) }
         }
       }
       return item
@@ -180,8 +193,8 @@ function handleExceed() {
 // 上传成功回调
 function handleUploadSuccess(res, file) {
   if (res.code === 200) {
-    const uploadUrl = resolveResourceUrl(res.fileName || res.url)
-    uploadList.value.push({ name: uploadUrl, url: uploadUrl })
+    const modelUrl = res.imageUrl || res.fileName || res.url
+    uploadList.value.push({ name: modelUrl, url: resolveResourceUrl(modelUrl), responseUrl: modelUrl })
     uploadedSuccessfully()
   } else {
     number.value--
@@ -233,7 +246,7 @@ function listToString(list, separator) {
   separator = separator || ","
   for (let i in list) {
     if (undefined !== list[i].url && list[i].url.indexOf("blob:") !== 0) {
-      const url = isExternal(list[i].url) ? list[i].url : list[i].url.replace(baseUrl, "")
+      const url = list[i].responseUrl || normalizeModelUrl(list[i].url)
       strs += url + separator
     }
   }

@@ -37,6 +37,14 @@ public interface SysUserMapper
     public List<SysUser> selectUnallocatedList(SysUser user);
 
     /**
+     * 根据角色权限字符查询正常用户列表
+     *
+     * @param roleKey 角色权限字符
+     * @return 用户信息集合信息
+     */
+    public List<SysUser> selectUsersByRoleKey(@Param("roleKey") String roleKey);
+
+    /**
      * 通过用户名查询用户
      * 
      * @param userName 用户名

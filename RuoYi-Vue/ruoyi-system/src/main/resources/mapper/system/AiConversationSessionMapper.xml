@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.AiConversationSessionMapper">
+
+    <resultMap type="AiConversationSession" id="AiConversationSessionResult">
+        <result property="sessionId" column="session_id" />
+        <result property="conversationId" column="conversation_id" />
+        <result property="sessionKey" column="session_key" />
+        <result property="provider" column="provider" />
+        <result property="modelName" column="model_name" />
+        <result property="status" column="status" />
+        <result property="startedAt" column="started_at" />
+        <result property="endedAt" column="ended_at" />
+        <result property="createTime" column="create_time" />
+        <result property="updateTime" column="update_time" />
+    </resultMap>
+
+    <select id="selectAiConversationSessionByConversationId" parameterType="Long" resultMap="AiConversationSessionResult">
+        select session_id, conversation_id, session_key, provider, model_name, status, started_at, ended_at, create_time, update_time
+        from ai_conversation_session
+        where conversation_id = #{conversationId}
+        order by session_id desc
+        limit 1
+    </select>
+
+    <insert id="insertAiConversationSession" parameterType="AiConversationSession" useGeneratedKeys="true" keyProperty="sessionId">
+        insert into ai_conversation_session
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="conversationId != null">conversation_id,</if>
+            <if test="sessionKey != null">session_key,</if>
+            <if test="provider != null">provider,</if>
+            <if test="modelName != null">model_name,</if>
+            <if test="status != null">status,</if>
+            <if test="startedAt != null">started_at,</if>
+            <if test="endedAt != null">ended_at,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateTime != null">update_time,</if>
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="conversationId != null">#{conversationId},</if>
+            <if test="sessionKey != null">#{sessionKey},</if>
+            <if test="provider != null">#{provider},</if>
+            <if test="modelName != null">#{modelName},</if>
+            <if test="status != null">#{status},</if>
+            <if test="startedAt != null">#{startedAt},</if>
+            <if test="endedAt != null">#{endedAt},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+        </trim>
+    </insert>
+
+    <update id="updateAiConversationSession" parameterType="AiConversationSession">
+        update ai_conversation_session
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="provider != null">provider = #{provider},</if>
+            <if test="modelName != null">model_name = #{modelName},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="endedAt != null">ended_at = #{endedAt},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </trim>
+        where session_id = #{sessionId}
+    </update>
+</mapper>

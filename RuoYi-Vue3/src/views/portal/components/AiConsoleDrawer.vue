@@ -11,7 +11,7 @@
     <section class="ai-console-shell">
       <header class="ai-console-head">
         <div>
-          <span>审核员工具</span>
+          <span>管理员工具</span>
           <h2>向量知识库与索引任务</h2>
           <p>AI 运维、房源索引和审核辅助放在这里，普通业务页面只保留当前角色的下一步动作。</p>
         </div>

@@ -2,6 +2,10 @@ ruoyi:
   profile: /home/ruoyi/uploadPath
 
 spring:
+  servlet:
+    multipart:
+      max-file-size: ${SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE:100MB}
+      max-request-size: ${SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE:100MB}
   data:
     redis:
       host: redis

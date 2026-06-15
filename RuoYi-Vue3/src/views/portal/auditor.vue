@@ -10,7 +10,6 @@
       </div>
       <div class="hero-actions">
         <el-button type="primary" icon="Finished" @click="goAuditWorkspace">进入审核队列</el-button>
-        <el-button plain icon="Promotion" @click="openAiConsole">AI 索引任务</el-button>
       </div>
     </section>
 
@@ -65,7 +64,7 @@
         <ul class="simple-list">
           <li>检查标题、地址、租金、面积、户主字段是否齐全</li>
           <li>生成审核意见草稿，保留人工通过和驳回</li>
-          <li>维护索引任务，确保公开房源可被 AI 检索</li>
+          <li>参考 AI 审核建议，最终结论仍由审核员确认</li>
           <li>不自动发布房源，不替代人工审查结论</li>
         </ul>
       </article>
@@ -93,7 +92,6 @@
 <script setup name="AuditorWorkbench">
 import { computed, onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import useUserStore from '@/store/modules/user'
 import { getPortalHomeSummary } from '@/api/portal/home'
 import { getAiCapabilities } from '@/api/portal/ai'
@@ -147,10 +145,6 @@ function goAuditWorkspace() {
   router.push({ path: '/portal/index', query: { entry: 'audit' } })
 }
 
-function openAiConsole() {
-  ElMessage.info('请进入审核队列后使用右上角 AI 工作台。')
-  router.push({ path: '/portal/index', query: { entry: 'audit', ai: 'console' } })
-}
 </script>
 
 <style scoped lang="scss">

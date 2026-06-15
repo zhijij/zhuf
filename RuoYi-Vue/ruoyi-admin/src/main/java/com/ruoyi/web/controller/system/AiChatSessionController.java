@@ -37,7 +37,7 @@ public class AiChatSessionController extends BaseController
     /**
      * 查询AI会话列表
      */
-    @PreAuthorize("@ss.hasPermi('system:session:list')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:session:list')")
     @GetMapping("/list")
     public TableDataInfo list(AiChatSession aiChatSession)
     {
@@ -49,7 +49,7 @@ public class AiChatSessionController extends BaseController
     /**
      * 导出AI会话列表
      */
-    @PreAuthorize("@ss.hasPermi('system:session:export')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:session:export')")
     @Log(title = "AI会话", businessType = BusinessType.EXPORT)
     @PostMapping("/export")
     public void export(HttpServletResponse response, AiChatSession aiChatSession)
@@ -62,7 +62,7 @@ public class AiChatSessionController extends BaseController
     /**
      * 获取AI会话详细信息
      */
-    @PreAuthorize("@ss.hasPermi('system:session:query')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:session:query')")
     @GetMapping(value = "/{sessionId}")
     public AjaxResult getInfo(@PathVariable("sessionId") Long sessionId)
     {
@@ -72,7 +72,7 @@ public class AiChatSessionController extends BaseController
     /**
      * 新增AI会话
      */
-    @PreAuthorize("@ss.hasPermi('system:session:add')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:session:add')")
     @Log(title = "AI会话", businessType = BusinessType.INSERT)
     @PostMapping
     public AjaxResult add(@RequestBody AiChatSession aiChatSession)
@@ -83,7 +83,7 @@ public class AiChatSessionController extends BaseController
     /**
      * 修改AI会话
      */
-    @PreAuthorize("@ss.hasPermi('system:session:edit')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:session:edit')")
     @Log(title = "AI会话", businessType = BusinessType.UPDATE)
     @PutMapping
     public AjaxResult edit(@RequestBody AiChatSession aiChatSession)
@@ -94,7 +94,7 @@ public class AiChatSessionController extends BaseController
     /**
      * 删除AI会话
      */
-    @PreAuthorize("@ss.hasPermi('system:session:remove')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:session:remove')")
     @Log(title = "AI会话", businessType = BusinessType.DELETE)
 	@DeleteMapping("/{sessionIds}")
     public AjaxResult remove(@PathVariable Long[] sessionIds)

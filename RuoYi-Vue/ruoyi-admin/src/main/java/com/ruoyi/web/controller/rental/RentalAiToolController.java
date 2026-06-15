@@ -85,14 +85,11 @@ public class RentalAiToolController
         {
             RentalHouse query = new RentalHouse();
             String city = text(request.get("city"));
-            if (StringUtils.isNotEmpty(city))
-            {
-                query.setCity(city);
-            }
             List<RentalHouse> houses = rentalHouseService.selectPublicRentalHouseList(query);
             BigDecimal maxRent = decimal(request.get("maxRent"));
             String keyword = text(request.get("query"));
             List<Map<String, Object>> matches = houses.stream()
+                    .filter(house -> matchesCity(house, city))
                     .filter(house -> maxRent == null || house.getRentAmount() == null
                             || house.getRentAmount().compareTo(maxRent) <= 0)
                     .filter(house -> matchesKeyword(house, keyword))
@@ -411,7 +408,8 @@ public class RentalAiToolController
 
     private boolean matchesKeyword(RentalHouse house, String keyword)
     {
-        if (StringUtils.isEmpty(keyword))
+        String normalizedKeyword = normalizeSearchKeyword(keyword);
+        if (StringUtils.isEmpty(normalizedKeyword))
         {
             return true;
         }
@@ -423,8 +421,59 @@ public class RentalAiToolController
                 nullToEmpty(house.getCommunity()),
                 nullToEmpty(house.getTags()),
                 nullToEmpty(house.getDescription()));
-        return haystack.contains(keyword) || keyword.contains(nullToEmpty(house.getCity()))
-                || keyword.contains(nullToEmpty(house.getDistrict()));
+        return haystack.contains(normalizedKeyword)
+                || containsKeyword(normalizedKeyword, house.getCity())
+                || containsKeyword(normalizedKeyword, trimCitySuffix(house.getCity()))
+                || containsKeyword(normalizedKeyword, house.getDistrict())
+                || containsKeyword(normalizedKeyword, house.getCommunity());
+    }
+
+    private boolean matchesCity(RentalHouse house, String city)
+    {
+        if (StringUtils.isEmpty(city))
+        {
+            return true;
+        }
+        return containsKeyword(normalizeSearchKeyword(city), house.getCity())
+                || containsKeyword(normalizeSearchKeyword(city), trimCitySuffix(house.getCity()));
+    }
+
+    private boolean containsKeyword(String keyword, String value)
+    {
+        if (StringUtils.isEmpty(keyword) || StringUtils.isEmpty(value))
+        {
+            return false;
+        }
+        return keyword.contains(value) || value.contains(keyword);
+    }
+
+    private String normalizeSearchKeyword(String keyword)
+    {
+        if (StringUtils.isEmpty(keyword))
+        {
+            return "";
+        }
+        return keyword
+                .replace("有没有", "")
+                .replace("有房源吗", "")
+                .replace("有房吗", "")
+                .replace("房源", "")
+                .replace("推荐", "")
+                .replace("找房", "")
+                .replace("可租", "")
+                .replace("吗", "")
+                .replace("？", "")
+                .replace("?", "")
+                .trim();
+    }
+
+    private String trimCitySuffix(String value)
+    {
+        if (StringUtils.isEmpty(value))
+        {
+            return "";
+        }
+        return value.endsWith("市") ? value.substring(0, value.length() - 1) : value;
     }
 
     private Map<String, Object> houseSummary(RentalHouse house)

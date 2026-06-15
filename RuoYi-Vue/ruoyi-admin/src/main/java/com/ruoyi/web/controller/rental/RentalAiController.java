@@ -11,8 +11,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -22,8 +25,12 @@ import com.ruoyi.common.core.domain.entity.SysUser;
 import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.core.domain.model.LoginUser;
 import com.ruoyi.common.utils.SecurityUtils;
+import com.ruoyi.common.utils.StringUtils;
+import com.ruoyi.system.domain.AiConversation;
+import com.ruoyi.system.domain.AiConversationMessage;
 import com.ruoyi.system.domain.AiVectorIndexTask;
 import com.ruoyi.system.domain.RentalHouse;
+import com.ruoyi.system.service.IAiConversationService;
 import com.ruoyi.system.service.IAiVectorIndexTaskService;
 import com.ruoyi.system.service.IRentalHouseService;
 
@@ -38,6 +45,9 @@ public class RentalAiController
 
     @Autowired
     private IRentalHouseService rentalHouseService;
+
+    @Autowired
+    private IAiConversationService aiConversationService;
 
     @Value("${ai.service.base-url}")
     private String aiBaseUrl;
@@ -61,6 +71,108 @@ public class RentalAiController
         return forward("/api/v1/agent/recommend", enrichRequest(request));
     }
 
+    @GetMapping("/conversations")
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant,owner,agent,auditor')")
+    public AjaxResult listConversations(@RequestParam(required = false) String workMode)
+    {
+        return AjaxResult.success(aiConversationService.listMyConversations(workMode));
+    }
+
+    @PostMapping("/conversations")
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant,owner,agent,auditor')")
+    public AjaxResult createConversation(@RequestBody(required = false) Map<String, Object> request)
+    {
+        return AjaxResult.success(aiConversationService.createConversation(request == null ? new HashMap<>() : request));
+    }
+
+    @GetMapping("/conversations/{conversationId}")
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant,owner,agent,auditor')")
+    public AjaxResult getConversation(@PathVariable Long conversationId)
+    {
+        return AjaxResult.success(aiConversationService.getMyConversation(conversationId));
+    }
+
+    @DeleteMapping("/conversations/{conversationId}")
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant,owner,agent,auditor')")
+    public AjaxResult deleteConversation(@PathVariable Long conversationId)
+    {
+        aiConversationService.deleteMyConversation(conversationId);
+        return AjaxResult.success();
+    }
+
+    @PutMapping("/conversations/{conversationId}/context")
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant,owner,agent,auditor')")
+    public AjaxResult saveConversationContext(@PathVariable Long conversationId, @RequestBody Map<String, Object> request)
+    {
+        return AjaxResult.success(aiConversationService.saveContext(conversationId, request));
+    }
+
+    @PostMapping("/conversations/{conversationId}/summary")
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant,owner,agent,auditor')")
+    public AjaxResult summarizeConversation(@PathVariable Long conversationId)
+    {
+        Map<String, Object> result = new HashMap<>();
+        result.put("summary", aiConversationService.summarizeConversation(conversationId));
+        return AjaxResult.success(result);
+    }
+
+    @PostMapping("/conversations/{conversationId}/messages")
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant,owner,agent,auditor')")
+    public AjaxResult sendConversationMessage(@PathVariable Long conversationId, @RequestBody Map<String, Object> request)
+    {
+        Object messageValue = request == null ? null : request.get("message");
+        String content = messageValue == null ? null : String.valueOf(messageValue).trim();
+        if (StringUtils.isEmpty(content))
+        {
+            return AjaxResult.error("消息内容不能为空");
+        }
+
+        Map<String, Object> context = extractMap(request, "context");
+        if (context != null)
+        {
+            aiConversationService.saveContext(conversationId, context);
+        }
+
+        Map<String, Object> userMetadata = new HashMap<>();
+        userMetadata.put("contextSnapshot", context);
+        List<Map<String, String>> history = aiConversationService.buildHistory(conversationId, 12);
+        AiConversationMessage userMessage = aiConversationService.addMessage(conversationId, "user", content, userMetadata);
+
+        Map<String, Object> payload = enrichRequest(request);
+        AiConversation conversation = aiConversationService.getMyConversation(conversationId);
+        String sessionKey = conversation.getSession() == null ? "ai-conversation-" + conversationId : conversation.getSession().getSessionKey();
+        payload.put("message", content);
+        payload.put("sessionId", sessionKey);
+        payload.put("history", history);
+
+        try
+        {
+            ResponseEntity<Map> response = restTemplate.postForEntity(aiBaseUrl + "/api/v1/agent/chat", payload, Map.class);
+            Map body = response.getBody();
+            String answer = body == null ? "" : String.valueOf(body.getOrDefault("answer", ""));
+            if (StringUtils.isEmpty(answer))
+            {
+                answer = "智能体接口已收到请求，等待后端返回标准化结果。";
+            }
+            AiConversationMessage assistantMessage = aiConversationService.addMessage(
+                    conversationId,
+                    "assistant",
+                    answer,
+                    buildAssistantMetadata(body, context));
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("conversation", aiConversationService.getMyConversation(conversationId));
+            result.put("userMessage", userMessage);
+            result.put("assistantMessage", assistantMessage);
+            result.put("assistant", body);
+            return AjaxResult.success(result);
+        }
+        catch (Exception e)
+        {
+            return AjaxResult.error("智能体服务暂不可用，请稍后再试");
+        }
+    }
+
     @GetMapping("/capabilities")
     @PreAuthorize("@ss.hasAnyExactRoles('user,tenant,owner,agent,auditor')")
     public AjaxResult capabilities()
@@ -77,7 +189,7 @@ public class RentalAiController
     }
 
     @PostMapping("/index/knowledge")
-    @PreAuthorize("@ss.hasAnyExactRoles('auditor')")
+    @PreAuthorize("@ss.hasRole('admin')")
     public AjaxResult indexKnowledge(@RequestBody Map<String, Object> request)
     {
         Map<String, Object> payload = enrichRequest(request);
@@ -87,14 +199,14 @@ public class RentalAiController
     }
 
     @PostMapping("/index/knowledge/seed")
-    @PreAuthorize("@ss.hasAnyExactRoles('auditor')")
+    @PreAuthorize("@ss.hasRole('admin')")
     public AjaxResult seedKnowledge()
     {
         return forward("/api/v1/index/knowledge/seed", enrichRequest(null));
     }
 
     @PostMapping("/index/tasks")
-    @PreAuthorize("@ss.hasAnyExactRoles('owner,agent,auditor')")
+    @PreAuthorize("@ss.hasRole('admin')")
     public AjaxResult createIndexTask(@RequestBody(required = false) Map<String, Object> request)
     {
         Map<String, Object> payload = enrichRequest(request);
@@ -103,9 +215,9 @@ public class RentalAiController
                 ? (houseId == null ? "sync" : "upsert")
                 : String.valueOf(payload.get("action"));
         RentalHouse house = null;
-        if (houseId == null && !hasExactRole("auditor"))
+        if (houseId == null && !hasAdminRole())
         {
-            return AjaxResult.error("只有审核员可以创建全量索引任务");
+            return AjaxResult.error("只有管理员可以创建全量索引任务");
         }
         if (houseId != null)
         {
@@ -145,7 +257,7 @@ public class RentalAiController
     }
 
     @GetMapping("/index/tasks")
-    @PreAuthorize("@ss.hasAnyExactRoles('owner,agent,auditor')")
+    @PreAuthorize("@ss.hasRole('admin')")
     public AjaxResult listIndexTasks()
     {
         AiVectorIndexTask query = new AiVectorIndexTask();
@@ -161,7 +273,7 @@ public class RentalAiController
     }
 
     @PostMapping("/index/tasks/{taskId}/process")
-    @PreAuthorize("@ss.hasAnyExactRoles('owner,agent,auditor')")
+    @PreAuthorize("@ss.hasRole('admin')")
     public AjaxResult processIndexTask(@PathVariable Long taskId)
     {
         AiVectorIndexTask task = aiVectorIndexTaskService.selectAiVectorIndexTaskByTaskId(taskId);
@@ -177,7 +289,7 @@ public class RentalAiController
     }
 
     @PostMapping("/index/tasks/process-pending")
-    @PreAuthorize("@ss.hasAnyExactRoles('owner,agent,auditor')")
+    @PreAuthorize("@ss.hasRole('admin')")
     public AjaxResult processPendingIndexTasks(@RequestBody(required = false) Map<String, Object> request)
     {
         Map<String, Object> payload = request == null ? new HashMap<>() : new HashMap<>(request);
@@ -207,7 +319,7 @@ public class RentalAiController
     }
 
     @GetMapping("/houses/{houseId}/document")
-    @PreAuthorize("@ss.hasAnyExactRoles('owner,agent,auditor')")
+    @PreAuthorize("@ss.hasRole('admin')")
     public AjaxResult inspectHouseDocument(@PathVariable Long houseId)
     {
         RentalHouse house = rentalHouseService.selectRentalHouseByHouseId(houseId);
@@ -389,6 +501,30 @@ public class RentalAiController
         }
     }
 
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> extractMap(Map<String, Object> request, String key)
+    {
+        if (request == null || !(request.get(key) instanceof Map))
+        {
+            return null;
+        }
+        return (Map<String, Object>) request.get(key);
+    }
+
+    private Map<String, Object> buildAssistantMetadata(Map body, Map<String, Object> context)
+    {
+        Map<String, Object> metadata = new HashMap<>();
+        if (body != null)
+        {
+            metadata.put("intent", body.get("intent"));
+            metadata.put("intentLabel", body.get("intentLabel"));
+            metadata.put("toolCalls", body.get("toolCalls"));
+            metadata.put("collaboration", body.get("collaboration"));
+        }
+        metadata.put("contextSnapshot", context);
+        return metadata;
+    }
+
     private Map<String, Object> enrichRequest(Map<String, Object> request)
     {
         Map<String, Object> payload = request == null ? new HashMap<>() : new HashMap<>(request);
@@ -452,7 +588,7 @@ public class RentalAiController
         {
             return false;
         }
-        if (hasExactRole("auditor"))
+        if (hasAdminRole())
         {
             return true;
         }
@@ -477,7 +613,7 @@ public class RentalAiController
         {
             return false;
         }
-        if (hasExactRole("auditor"))
+        if (hasAdminRole())
         {
             return true;
         }
@@ -497,6 +633,19 @@ public class RentalAiController
             SysUser user = loginUser.getUser();
             List<SysRole> roles = user == null || user.getRoles() == null ? Collections.emptyList() : user.getRoles();
             return roles.stream().anyMatch(role -> expectedRole.equals(role.getRoleKey()));
+        }
+        catch (Exception e)
+        {
+            return false;
+        }
+    }
+
+    private boolean hasAdminRole()
+    {
+        try
+        {
+            LoginUser loginUser = SecurityUtils.getLoginUser();
+            return SecurityUtils.isAdmin(loginUser.getUserId()) || hasExactRole("admin");
         }
         catch (Exception e)
         {

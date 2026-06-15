@@ -10,6 +10,7 @@ import com.ruoyi.system.mapper.RentalIntentionMapper;
 import com.ruoyi.system.domain.RentalHouse;
 import com.ruoyi.system.domain.RentalIntention;
 import com.ruoyi.system.enums.RentalIntentionStatus;
+import com.ruoyi.system.enums.RentalOperationMode;
 import com.ruoyi.system.service.IRentalHouseService;
 import com.ruoyi.system.service.IRentalIntentionService;
 
@@ -75,7 +76,7 @@ public class RentalIntentionServiceImpl implements IRentalIntentionService
         RentalHouse house = rentalHouseService.selectRentalHouseDetail(rentalIntention.getHouseId(), tenantId, false);
         rentalIntention.setTenantId(tenantId);
         rentalIntention.setOwnerId(house.getOwnerId());
-        rentalIntention.setAgentId(house.getAgentId());
+        rentalIntention.setAgentId(effectiveAgentId(house));
         if (StringUtils.isEmpty(rentalIntention.getIntentionLevel()))
         {
             rentalIntention.setIntentionLevel("1");
@@ -191,6 +192,12 @@ public class RentalIntentionServiceImpl implements IRentalIntentionService
             throw new ServiceException("租赁意向不存在");
         }
         return intention;
+    }
+
+    private Long effectiveAgentId(RentalHouse house)
+    {
+        return house != null && RentalOperationMode.AGENT_ENTRUST.code().equals(house.getOperationMode())
+                ? house.getAgentId() : null;
     }
 
     private RentalIntention requireAgentIntention(Long intentionId, Long agentId)

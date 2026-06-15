@@ -1,8 +1,10 @@
 package com.ruoyi.web.controller.rental;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,22 +14,28 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.core.controller.BaseController;
 import com.ruoyi.common.core.domain.AjaxResult;
+import com.ruoyi.common.core.domain.entity.SysUser;
 import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.common.utils.SecurityUtils;
 import com.ruoyi.common.utils.StringUtils;
+import com.ruoyi.common.utils.file.MimeTypeUtils;
 import com.ruoyi.system.domain.BizChatSession;
 import com.ruoyi.system.domain.RentalHouse;
 import com.ruoyi.system.domain.RentalHouseEntrust;
 import com.ruoyi.system.enums.RentalEntrustStatus;
 import com.ruoyi.system.enums.RentalOperationMode;
+import com.ruoyi.system.mapper.SysUserMapper;
 import com.ruoyi.system.service.IBizChatService;
 import com.ruoyi.system.service.IRentalHouseEntrustService;
 import com.ruoyi.system.service.IRentalHouseService;
 import com.ruoyi.web.service.RentalAmapService;
+import com.ruoyi.web.service.storage.ObjectStorageService;
+import com.ruoyi.web.service.storage.StoredObject;
 
 /**
  * Owner-side rental business APIs.
@@ -46,7 +54,13 @@ public class RentalOwnerController extends BaseController
     private IBizChatService bizChatService;
 
     @Autowired
+    private SysUserMapper sysUserMapper;
+
+    @Autowired
     private RentalAmapService rentalAmapService;
+
+    @Autowired
+    private ObjectStorageService objectStorageService;
 
     @PreAuthorize("@ss.hasAnyExactRoles('owner')")
     @GetMapping("/houses")
@@ -77,6 +91,21 @@ public class RentalOwnerController extends BaseController
     }
 
     @PreAuthorize("@ss.hasAnyExactRoles('owner')")
+    @Log(title = "户主上传房源图片", businessType = BusinessType.INSERT)
+    @PostMapping("/houses/images/upload")
+    public AjaxResult uploadHouseImage(MultipartFile file) throws Exception
+    {
+        StoredObject object = objectStorageService.upload(file, MimeTypeUtils.IMAGE_EXTENSION, true);
+        AjaxResult ajax = AjaxResult.success();
+        ajax.put("url", object.getUrl());
+        ajax.put("fileName", object.getFileName());
+        ajax.put("imageUrl", object.getFileName());
+        ajax.put("newFileName", object.getNewFileName());
+        ajax.put("originalFilename", object.getOriginalFilename());
+        return ajax;
+    }
+
+    @PreAuthorize("@ss.hasAnyExactRoles('owner')")
     @GetMapping("/houses/geocode")
     public AjaxResult geocodeHouse(@RequestParam String address,
             @RequestParam(required = false) String city)
@@ -91,6 +120,20 @@ public class RentalOwnerController extends BaseController
     {
         assertOwnerHouse(houseId);
         return toAjax(rentalHouseService.resubmitRentalHouseAudit(houseId, SecurityUtils.getUserId(), SecurityUtils.getUsername()));
+    }
+
+    @PreAuthorize("@ss.hasAnyExactRoles('owner')")
+    @GetMapping("/houses/{houseId}/candidate-agents")
+    public AjaxResult listCandidateAgents(@PathVariable Long houseId)
+    {
+        assertOwnerHouse(houseId);
+        List<Map<String, Object>> agents = sysUserMapper.selectUsersByRoleKey("agent").stream()
+                .filter(user -> user.getUserId() != null)
+                .filter(user -> !SecurityUtils.getUserId().equals(user.getUserId()))
+                .filter(user -> !hasPendingOrActiveEntrust(houseId, user.getUserId()))
+                .map(this::agentOption)
+                .collect(Collectors.toList());
+        return AjaxResult.success(agents);
     }
 
     @PreAuthorize("@ss.hasAnyExactRoles('owner')")
@@ -190,6 +233,27 @@ public class RentalOwnerController extends BaseController
             throw new ServiceException("只能由户主处理该委托关系");
         }
         return entrust;
+    }
+
+    private boolean hasPendingOrActiveEntrust(Long houseId, Long agentId)
+    {
+        RentalHouseEntrust query = new RentalHouseEntrust();
+        query.setHouseId(houseId);
+        query.setAgentId(agentId);
+        return rentalHouseEntrustService.selectRentalHouseEntrustList(query).stream()
+                .anyMatch(entrust -> RentalEntrustStatus.PENDING.code().equals(entrust.getStatus())
+                        || RentalEntrustStatus.ACTIVE.code().equals(entrust.getStatus()));
+    }
+
+    private Map<String, Object> agentOption(SysUser user)
+    {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("userId", user.getUserId());
+        item.put("userName", user.getUserName());
+        item.put("nickName", user.getNickName());
+        item.put("phonenumber", user.getPhonenumber());
+        item.put("avatar", user.getAvatar());
+        return item;
     }
 
     private void fillHouseCoordinate(RentalHouse rentalHouse)

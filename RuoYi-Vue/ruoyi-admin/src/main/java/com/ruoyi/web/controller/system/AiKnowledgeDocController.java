@@ -37,7 +37,7 @@ public class AiKnowledgeDocController extends BaseController
     /**
      * 查询AI知识库文档列表
      */
-    @PreAuthorize("@ss.hasPermi('system:doc:list')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:doc:list')")
     @GetMapping("/list")
     public TableDataInfo list(AiKnowledgeDoc aiKnowledgeDoc)
     {
@@ -49,7 +49,7 @@ public class AiKnowledgeDocController extends BaseController
     /**
      * 导出AI知识库文档列表
      */
-    @PreAuthorize("@ss.hasPermi('system:doc:export')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:doc:export')")
     @Log(title = "AI知识库文档", businessType = BusinessType.EXPORT)
     @PostMapping("/export")
     public void export(HttpServletResponse response, AiKnowledgeDoc aiKnowledgeDoc)
@@ -62,7 +62,7 @@ public class AiKnowledgeDocController extends BaseController
     /**
      * 获取AI知识库文档详细信息
      */
-    @PreAuthorize("@ss.hasPermi('system:doc:query')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:doc:query')")
     @GetMapping(value = "/{docId}")
     public AjaxResult getInfo(@PathVariable("docId") Long docId)
     {
@@ -72,7 +72,7 @@ public class AiKnowledgeDocController extends BaseController
     /**
      * 新增AI知识库文档
      */
-    @PreAuthorize("@ss.hasPermi('system:doc:add')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:doc:add')")
     @Log(title = "AI知识库文档", businessType = BusinessType.INSERT)
     @PostMapping
     public AjaxResult add(@RequestBody AiKnowledgeDoc aiKnowledgeDoc)
@@ -83,7 +83,7 @@ public class AiKnowledgeDocController extends BaseController
     /**
      * 修改AI知识库文档
      */
-    @PreAuthorize("@ss.hasPermi('system:doc:edit')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:doc:edit')")
     @Log(title = "AI知识库文档", businessType = BusinessType.UPDATE)
     @PutMapping
     public AjaxResult edit(@RequestBody AiKnowledgeDoc aiKnowledgeDoc)
@@ -94,7 +94,7 @@ public class AiKnowledgeDocController extends BaseController
     /**
      * 删除AI知识库文档
      */
-    @PreAuthorize("@ss.hasPermi('system:doc:remove')")
+    @PreAuthorize("@ss.hasRole('admin') and @ss.hasPermi('system:doc:remove')")
     @Log(title = "AI知识库文档", businessType = BusinessType.DELETE)
 	@DeleteMapping("/{docIds}")
     public AjaxResult remove(@PathVariable Long[] docIds)

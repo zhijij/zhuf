@@ -38,6 +38,7 @@
           plain
           icon="Plus"
           @click="handleAdd"
+          v-hasRole="['admin']"
           v-hasPermi="['system:task:add']"
         >新增</el-button>
       </el-col>
@@ -48,6 +49,7 @@
           icon="Edit"
           :disabled="single"
           @click="handleUpdate"
+          v-hasRole="['admin']"
           v-hasPermi="['system:task:edit']"
         >修改</el-button>
       </el-col>
@@ -58,6 +60,7 @@
           icon="Delete"
           :disabled="multiple"
           @click="handleDelete"
+          v-hasRole="['admin']"
           v-hasPermi="['system:task:remove']"
         >删除</el-button>
       </el-col>
@@ -67,6 +70,7 @@
           plain
           icon="Download"
           @click="handleExport"
+          v-hasRole="['admin']"
           v-hasPermi="['system:task:export']"
         >导出</el-button>
       </el-col>
@@ -84,8 +88,8 @@
       <el-table-column label="错误信息" align="center" prop="errorMsg" />
       <el-table-column label="操作" align="center" class-name="small-padding fixed-width">
         <template #default="scope">
-          <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['system:task:edit']">修改</el-button>
-          <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['system:task:remove']">删除</el-button>
+          <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasRole="['admin']" v-hasPermi="['system:task:edit']">修改</el-button>
+          <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasRole="['admin']" v-hasPermi="['system:task:remove']">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
