@@ -115,13 +115,18 @@ export function filterDynamicRoutes(routes) {
 
 export const loadView = (view) => {
   let res
+  const normalizedView = (view || '')
+    .replace(/^\/+/, '')
+    .replace(/^src\/views\//, '')
+    .replace(/^views\//, '')
+    .replace(/\.vue$/, '')
   for (const path in modules) {
     const dir = path.split('views/')[1].split('.vue')[0]
-    if (dir === view) {
+    if (dir === normalizedView) {
       res = () => modules[path]()
     }
   }
-  return res
+  return res || (() => import('@/views/error/404.vue'))
 }
 
 export default usePermissionStore

@@ -22,6 +22,22 @@ export function rejectAgentEntrust(entrustId) {
   })
 }
 
+export function listAgentCandidateHouses(query) {
+  return request({
+    url: '/rental/agent/candidate-houses',
+    method: 'get',
+    params: query
+  })
+}
+
+export function applyAgentEntrust(houseId, data) {
+  return request({
+    url: `/rental/agent/houses/${houseId}/apply-entrust`,
+    method: 'post',
+    data
+  })
+}
+
 export function listAgentHouses(query) {
   return request({
     url: '/rental/agent/houses',

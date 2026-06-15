@@ -35,68 +35,71 @@ public class RentalContractBusinessController extends BaseController
     @Autowired
     private IBizChatService bizChatService;
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,user,tenant,owner,agent')")
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant,owner,agent')")
     @GetMapping("/my")
     public AjaxResult listMyContracts(RentalContract query)
     {
-        if (!SecurityUtils.isAdmin())
-        {
-            return AjaxResult.success(rentalContractService.selectMyRentalContractList(getUserId()));
-        }
-        if (!SecurityUtils.isAdmin())
-        {
-            // 租户端、中介端已有专属列表；这里默认按租户查询，后台可传任意条件。
-            query.setTenantId(getUserId());
-        }
-        return AjaxResult.success(rentalContractService.selectRentalContractList(query));
+        return AjaxResult.success(rentalContractService.selectMyRentalContractList(getUserId()));
     }
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,user,tenant,owner,agent')")
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant,owner,agent')")
     @GetMapping("/{contractId}")
     public AjaxResult detail(@PathVariable Long contractId)
     {
-        return AjaxResult.success(rentalContractService.selectRentalContractDetail(contractId, getUserId(), SecurityUtils.isAdmin()));
+        return AjaxResult.success(rentalContractService.selectRentalContractDetail(contractId, getUserId(), false));
     }
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,owner,agent')")
+    @PreAuthorize("@ss.hasAnyExactRoles('owner,agent')")
     @Log(title = "提交合同确认", businessType = BusinessType.UPDATE)
     @PostMapping("/{contractId}/submit-sign")
     public AjaxResult submitSign(@PathVariable Long contractId)
     {
-        return toAjax(rentalContractService.submitContractSign(contractId, getUserId(), SecurityUtils.isAdmin()));
+        rentalContractService.submitContractSign(contractId, getUserId(), false);
+        BizChatSession chatSession = openContractChat(contractId);
+        bizChatService.sendSystemMessage("contract", contractId, "合同已提交签署，请各方确认。");
+        return AjaxResult.success("合同已提交签署").put("chatSession", chatSession);
     }
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,user,tenant')")
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant')")
     @Log(title = "租户确认合同", businessType = BusinessType.UPDATE)
     @PostMapping("/{contractId}/tenant-confirm")
     public AjaxResult tenantConfirm(@PathVariable Long contractId, @RequestBody(required = false) RentalContractConfirmRequest request)
     {
         String opinion = request == null ? null : request.getOpinion();
         rentalContractService.confirmContract(contractId, getUserId(), RentalContractPartyRole.TENANT.code(), opinion);
-        return AjaxResult.success("租户已确认").put("chatSession", openContractChat(contractId));
+        BizChatSession chatSession = openContractChat(contractId);
+        bizChatService.sendSystemMessage("contract", contractId,
+                opinion == null || opinion.isBlank() ? "租户已确认合同。" : "租户已确认合同，意见：" + opinion);
+        return AjaxResult.success("租户已确认").put("chatSession", chatSession);
     }
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,owner')")
+    @PreAuthorize("@ss.hasAnyExactRoles('owner')")
     @Log(title = "房东确认合同", businessType = BusinessType.UPDATE)
     @PostMapping("/{contractId}/owner-confirm")
     public AjaxResult ownerConfirm(@PathVariable Long contractId, @RequestBody(required = false) RentalContractConfirmRequest request)
     {
         String opinion = request == null ? null : request.getOpinion();
         rentalContractService.confirmContract(contractId, getUserId(), RentalContractPartyRole.OWNER.code(), opinion);
-        return AjaxResult.success("房东已确认").put("chatSession", openContractChat(contractId));
+        BizChatSession chatSession = openContractChat(contractId);
+        bizChatService.sendSystemMessage("contract", contractId,
+                opinion == null || opinion.isBlank() ? "户主已确认合同。" : "户主已确认合同，意见：" + opinion);
+        return AjaxResult.success("房东已确认").put("chatSession", chatSession);
     }
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,agent')")
+    @PreAuthorize("@ss.hasAnyExactRoles('agent')")
     @Log(title = "中介确认合同", businessType = BusinessType.UPDATE)
     @PostMapping("/{contractId}/agent-confirm")
     public AjaxResult agentConfirm(@PathVariable Long contractId, @RequestBody(required = false) RentalContractConfirmRequest request)
     {
         String opinion = request == null ? null : request.getOpinion();
         rentalContractService.confirmContract(contractId, getUserId(), RentalContractPartyRole.AGENT.code(), opinion);
-        return AjaxResult.success("中介已确认").put("chatSession", openContractChat(contractId));
+        BizChatSession chatSession = openContractChat(contractId);
+        bizChatService.sendSystemMessage("contract", contractId,
+                opinion == null || opinion.isBlank() ? "中介已确认合同。" : "中介已确认合同，意见：" + opinion);
+        return AjaxResult.success("中介已确认").put("chatSession", chatSession);
     }
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,user,tenant,owner,agent')")
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant,owner,agent')")
     @Log(title = "拒绝合同", businessType = BusinessType.UPDATE)
     @PostMapping("/{contractId}/reject")
     public AjaxResult reject(@PathVariable Long contractId, @RequestBody(required = false) RentalContractConfirmRequest request)
@@ -104,36 +107,50 @@ public class RentalContractBusinessController extends BaseController
         String opinion = request == null ? null : request.getOpinion();
         String role = resolveCurrentContractRole(contractId);
         rentalContractService.rejectContract(contractId, getUserId(), role, opinion);
-        return AjaxResult.success("合同已拒绝").put("chatSession", openContractChat(contractId));
+        BizChatSession chatSession = openContractChat(contractId);
+        bizChatService.sendSystemMessage("contract", contractId,
+                opinion == null || opinion.isBlank() ? "合同已被拒绝。" : "合同已被拒绝，意见：" + opinion);
+        return AjaxResult.success("合同已拒绝").put("chatSession", chatSession);
     }
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,owner,agent')")
+    @PreAuthorize("@ss.hasAnyExactRoles('owner,agent')")
     @Log(title = "合同生效", businessType = BusinessType.UPDATE)
     @PostMapping("/{contractId}/activate")
     public AjaxResult activate(@PathVariable Long contractId)
     {
-        return toAjax(rentalContractService.activateContract(contractId, getUserId(), SecurityUtils.isAdmin()));
+        rentalContractService.activateContract(contractId, getUserId(), false);
+        BizChatSession chatSession = openContractChat(contractId);
+        bizChatService.sendSystemMessage("contract", contractId, "合同已生效。");
+        return AjaxResult.success("合同已生效").put("chatSession", chatSession);
     }
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,user,tenant,owner,agent')")
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant,owner,agent')")
     @Log(title = "作废合同", businessType = BusinessType.UPDATE)
     @PostMapping("/{contractId}/void")
     public AjaxResult voidContract(@PathVariable Long contractId, @RequestBody(required = false) RentalAppointmentActionRequest request)
     {
         String reason = request == null ? null : request.getReason();
-        return toAjax(rentalContractService.voidContract(contractId, getUserId(), SecurityUtils.isAdmin(), reason));
+        rentalContractService.voidContract(contractId, getUserId(), false, reason);
+        BizChatSession chatSession = openContractChat(contractId);
+        bizChatService.sendSystemMessage("contract", contractId,
+                reason == null || reason.isBlank() ? "合同已作废。" : "合同已作废，原因：" + reason);
+        return AjaxResult.success("合同已作废").put("chatSession", chatSession);
     }
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,owner,agent')")
+    @PreAuthorize("@ss.hasAnyExactRoles('owner,agent')")
     @Log(title = "终止合同", businessType = BusinessType.UPDATE)
     @PostMapping("/{contractId}/terminate")
     public AjaxResult terminate(@PathVariable Long contractId, @RequestBody(required = false) RentalAppointmentActionRequest request)
     {
         String reason = request == null ? null : request.getReason();
-        return toAjax(rentalContractService.terminateContract(contractId, getUserId(), SecurityUtils.isAdmin(), reason));
+        rentalContractService.terminateContract(contractId, getUserId(), false, reason);
+        BizChatSession chatSession = openContractChat(contractId);
+        bizChatService.sendSystemMessage("contract", contractId,
+                reason == null || reason.isBlank() ? "合同已终止。" : "合同已终止，原因：" + reason);
+        return AjaxResult.success("合同已终止").put("chatSession", chatSession);
     }
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,user,tenant,owner,agent')")
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant,owner,agent')")
     @PostMapping("/{contractId}/chat")
     public AjaxResult chat(@PathVariable Long contractId)
     {

@@ -146,6 +146,9 @@ public class RentalHouse extends BaseEntity
     /** 删除标志 */
     private String delFlag;
 
+    /** 房源图片地址，多个地址用英文逗号分隔；不直接映射 rental_house 表 */
+    private String imageUrls;
+
     public void setHouseId(Long houseId) 
     {
         this.houseId = houseId;
@@ -476,6 +479,16 @@ public class RentalHouse extends BaseEntity
         return delFlag;
     }
 
+    public void setImageUrls(String imageUrls)
+    {
+        this.imageUrls = imageUrls;
+    }
+
+    public String getImageUrls()
+    {
+        return imageUrls;
+    }
+
     @Override
     public String toString() {
         return new ToStringBuilder(this,ToStringStyle.MULTI_LINE_STYLE)
@@ -512,6 +525,7 @@ public class RentalHouse extends BaseEntity
             .append("favoriteCount", getFavoriteCount())
             .append("aiIndexStatus", getAiIndexStatus())
             .append("delFlag", getDelFlag())
+            .append("imageUrls", getImageUrls())
             .append("createBy", getCreateBy())
             .append("createTime", getCreateTime())
             .append("updateBy", getUpdateBy())

@@ -67,7 +67,7 @@ public class BizChatServiceImpl implements IBizChatService
 
         ChatBizParticipants participants = resolveParticipants(bizType, bizId);
         Long currentUserId = SecurityUtils.getUserId();
-        if (!SecurityUtils.isAdmin() && !participants.contains(currentUserId))
+        if (!participants.contains(currentUserId))
         {
             throw new ServiceException("当前用户无权打开该业务聊天");
         }
@@ -98,16 +98,7 @@ public class BizChatServiceImpl implements IBizChatService
     {
         Long currentUserId = SecurityUtils.getUserId();
         List<BizChatSession> sessions;
-        if (SecurityUtils.isAdmin())
-        {
-            BizChatSession query = new BizChatSession();
-            query.setStatus("0");
-            sessions = bizChatSessionMapper.selectBizChatSessionList(query);
-        }
-        else
-        {
-            sessions = bizChatSessionMapper.selectBizChatSessionListByUserId(currentUserId);
-        }
+        sessions = bizChatSessionMapper.selectBizChatSessionListByUserId(currentUserId);
         for (BizChatSession session : sessions)
         {
             session.setMembers(listMembers(session.getSessionId()));
@@ -121,7 +112,9 @@ public class BizChatServiceImpl implements IBizChatService
         assertCanAccessSession(sessionId);
         BizChatMessage query = new BizChatMessage();
         query.setSessionId(sessionId);
-        return bizChatMessageMapper.selectBizChatMessageList(query);
+        List<BizChatMessage> messages = bizChatMessageMapper.selectBizChatMessageList(query);
+        markRead(sessionId, messages);
+        return messages;
     }
 
     @Override
@@ -142,6 +135,9 @@ public class BizChatServiceImpl implements IBizChatService
         message.setCreateTime(DateUtils.getNowDate());
         bizChatMessageMapper.insertBizChatMessage(message);
 
+        bizChatSessionUserMapper.increaseUnreadForReceivers(sessionId, message.getSenderId());
+        bizChatSessionUserMapper.markSessionRead(sessionId, message.getSenderId(), message.getMessageId());
+
         BizChatSession session = new BizChatSession();
         session.setSessionId(sessionId);
         session.setLastMessage(content.length() > 200 ? content.substring(0, 200) : content);
@@ -149,6 +145,52 @@ public class BizChatServiceImpl implements IBizChatService
         session.setUpdateTime(DateUtils.getNowDate());
         bizChatSessionMapper.updateBizChatSession(session);
         return message;
+    }
+
+    @Override
+    @Transactional
+    public BizChatMessage sendSystemMessage(String bizType, Long bizId, String content)
+    {
+        BizChatSession session = openSession(bizType, bizId);
+        if (StringUtils.isEmpty(content))
+        {
+            throw new ServiceException("系统消息内容不能为空");
+        }
+
+        BizChatMessage message = new BizChatMessage();
+        message.setSessionId(session.getSessionId());
+        message.setSenderId(0L);
+        message.setMessageType("system");
+        message.setContent(content);
+        message.setCreateTime(DateUtils.getNowDate());
+        bizChatMessageMapper.insertBizChatMessage(message);
+
+        bizChatSessionUserMapper.increaseUnreadForReceivers(session.getSessionId(), 0L);
+        try
+        {
+            bizChatSessionUserMapper.markSessionRead(session.getSessionId(), SecurityUtils.getUserId(), message.getMessageId());
+        }
+        catch (Exception ignored)
+        {
+        }
+
+        BizChatSession update = new BizChatSession();
+        update.setSessionId(session.getSessionId());
+        update.setLastMessage(content.length() > 200 ? content.substring(0, 200) : content);
+        update.setLastMessageTime(DateUtils.getNowDate());
+        update.setUpdateTime(DateUtils.getNowDate());
+        bizChatSessionMapper.updateBizChatSession(update);
+        return message;
+    }
+
+    private void markRead(Long sessionId, List<BizChatMessage> messages)
+    {
+        Long lastMessageId = null;
+        if (!messages.isEmpty())
+        {
+            lastMessageId = messages.get(messages.size() - 1).getMessageId();
+        }
+        bizChatSessionUserMapper.markSessionRead(sessionId, SecurityUtils.getUserId(), lastMessageId);
     }
 
     private void assertCanAccessSession(Long sessionId)
@@ -162,8 +204,7 @@ public class BizChatServiceImpl implements IBizChatService
         {
             throw new ServiceException("业务聊天会话不存在");
         }
-        if (!SecurityUtils.isAdmin()
-                && bizChatSessionUserMapper.selectBizChatSessionUser(sessionId, SecurityUtils.getUserId()) == null)
+        if (bizChatSessionUserMapper.selectBizChatSessionUser(sessionId, SecurityUtils.getUserId()) == null)
         {
             throw new ServiceException("当前用户无权访问该业务聊天");
         }

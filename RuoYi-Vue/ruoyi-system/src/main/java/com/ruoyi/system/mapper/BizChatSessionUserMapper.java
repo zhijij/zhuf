@@ -11,4 +11,8 @@ public interface BizChatSessionUserMapper
     List<BizChatSessionUser> selectBizChatSessionUserList(BizChatSessionUser bizChatSessionUser);
 
     int insertBizChatSessionUser(BizChatSessionUser bizChatSessionUser);
+
+    int markSessionRead(@Param("sessionId") Long sessionId, @Param("userId") Long userId, @Param("messageId") Long messageId);
+
+    int increaseUnreadForReceivers(@Param("sessionId") Long sessionId, @Param("senderId") Long senderId);
 }

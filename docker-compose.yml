@@ -1,0 +1,151 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: smart-rental-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-feng123}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ry-vue}
+      MYSQL_USER: ${MYSQL_USER:-ruoyi}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-feng123}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --init-connect=SET NAMES utf8mb4
+      - --default-time-zone=+08:00
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./RuoYi-Vue/sql/ry_20260417.sql:/docker-entrypoint-initdb.d/01-ry.sql:ro
+      - ./RuoYi-Vue/sql/quartz.sql:/docker-entrypoint-initdb.d/02-quartz.sql:ro
+      - ./RuoYi-Vue/sql/smart_rental_schema.sql:/docker-entrypoint-initdb.d/03-smart-rental-schema.sql:ro
+      - ./RuoYi-Vue/sql/smart_rental_business_chat.sql:/docker-entrypoint-initdb.d/04-smart-rental-business-chat.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: smart-rental-redis
+    restart: unless-stopped
+    command: ["sh", "-c", "redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-2972515097Fzh/}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  vector-db:
+    image: pgvector/pgvector:pg17
+    container_name: smart-rental-vector-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${VECTOR_DB_NAME:-smart_rental_ai}
+      POSTGRES_USER: ${VECTOR_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${VECTOR_DB_PASSWORD:-postgres}
+      TZ: Asia/Shanghai
+    ports:
+      - "${VECTOR_DB_PORT:-5433}:5432"
+    volumes:
+      - vector-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  ai-service:
+    build:
+      context: ./ai-service
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+    container_name: smart-rental-ai
+    restart: unless-stopped
+    environment:
+      AI_LLM_BASE_URL: ${AI_LLM_BASE_URL:-}
+      AI_LLM_API_KEY: ${AI_LLM_API_KEY:-}
+      AI_LLM_MODEL: ${AI_LLM_MODEL:-}
+      AI_EMBEDDING_BASE_URL: ${AI_EMBEDDING_BASE_URL:-}
+      AI_EMBEDDING_API_KEY: ${AI_EMBEDDING_API_KEY:-}
+      AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-}
+      AI_EMBEDDING_DIM: ${AI_EMBEDDING_DIM:-64}
+      VECTOR_DB_HOST: vector-db
+      VECTOR_DB_PORT: 5432
+      VECTOR_DB_NAME: ${VECTOR_DB_NAME:-smart_rental_ai}
+      VECTOR_DB_USER: ${VECTOR_DB_USER:-postgres}
+      VECTOR_DB_PASSWORD: ${VECTOR_DB_PASSWORD:-postgres}
+      VECTOR_DB_EMBEDDING_DIM: ${VECTOR_DB_EMBEDDING_DIM:-64}
+    ports:
+      - "8000:8000"
+    depends_on:
+      vector-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ./RuoYi-Vue
+    container_name: smart-rental-backend
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: docker,druid-docker
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ry-vue}
+      MYSQL_USER: ${MYSQL_USER:-ruoyi}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-feng123}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-2972515097Fzh/}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
+      TENCENT_COS_SECRET_ID: ${TENCENT_COS_SECRET_ID:-}
+      TENCENT_COS_SECRET_KEY: ${TENCENT_COS_SECRET_KEY:-}
+      TENCENT_COS_REGION: ${TENCENT_COS_REGION:-ap-chengdu}
+      TENCENT_COS_BUCKET: ${TENCENT_COS_BUCKET:-document-1419823100}
+      TENCENT_COS_PRESIGNED_EXPIRATION_SECONDS: ${TENCENT_COS_PRESIGNED_EXPIRATION_SECONDS:-43200}
+      TZ: Asia/Shanghai
+    ports:
+      - "8080:8080"
+    volumes:
+      - backend-uploads:/home/ruoyi/uploadPath
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/captchaImage"]
+      interval: 20s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  frontend:
+    build:
+      context: ./RuoYi-Vue3
+    container_name: smart-rental-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  mysql-data:
+  redis-data:
+  vector-db-data:
+  backend-uploads:

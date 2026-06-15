@@ -1,12 +1,12 @@
-# portal directory
+# Portal Directory
 
-This directory is the user-facing frontend for the smart rental system.
+This directory contains the user-facing frontend for 智能AI房屋租赁系统.
 
 - `src/views/system`
-  - admin and backend management pages
-  - generated CRUD pages from RuoYi code generator
+  - backend management pages
+  - administrator configuration and platform operations
 - `src/views/portal`
-  - tenant, owner, and agent user-facing pages
-  - portal home and AI interaction entry pages
+  - tenant, owner, agent, and auditor workspaces
+  - AI interaction entry, business lists, detail panels, and reusable chat drawer
 
 Keep backend management UI and user portal UI separated in these two directories.

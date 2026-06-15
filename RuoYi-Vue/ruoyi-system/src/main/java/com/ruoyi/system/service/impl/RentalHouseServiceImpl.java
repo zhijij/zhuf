@@ -1,5 +1,6 @@
 package com.ruoyi.system.service.impl;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 import com.ruoyi.common.utils.DateUtils;
@@ -8,10 +9,12 @@ import com.ruoyi.common.utils.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.ruoyi.system.domain.AiVectorIndexTask;
 import com.ruoyi.system.domain.RentalContract;
 import com.ruoyi.system.mapper.RentalHouseMapper;
 import com.ruoyi.system.domain.RentalHouse;
 import com.ruoyi.system.domain.RentalHouseEntrust;
+import com.ruoyi.system.domain.RentalHouseImage;
 import com.ruoyi.system.domain.dto.RentalHouseAuditRequest;
 import com.ruoyi.system.domain.dto.RentalHouseCancelRequest;
 import com.ruoyi.system.domain.dto.RentalHouseDealRequest;
@@ -19,8 +22,10 @@ import com.ruoyi.system.enums.RentalAuditStatus;
 import com.ruoyi.system.enums.RentalEntrustStatus;
 import com.ruoyi.system.enums.RentalHouseStatus;
 import com.ruoyi.system.enums.RentalOperationMode;
+import com.ruoyi.system.service.IAiVectorIndexTaskService;
 import com.ruoyi.system.service.IRentalContractService;
 import com.ruoyi.system.service.IRentalHouseEntrustService;
+import com.ruoyi.system.service.IRentalHouseImageService;
 import com.ruoyi.system.service.IRentalHouseService;
 
 /**
@@ -40,6 +45,12 @@ public class RentalHouseServiceImpl implements IRentalHouseService
 
     @Autowired
     private IRentalContractService rentalContractService;
+
+    @Autowired
+    private IRentalHouseImageService rentalHouseImageService;
+
+    @Autowired
+    private IAiVectorIndexTaskService aiVectorIndexTaskService;
 
     /**
      * 查询租赁房源
@@ -80,12 +91,25 @@ public class RentalHouseServiceImpl implements IRentalHouseService
     }
 
     @Override
+    public List<RentalHouse> selectAuditRentalHouseList(RentalHouse rentalHouse)
+    {
+        if (rentalHouse == null)
+        {
+            rentalHouse = new RentalHouse();
+        }
+        rentalHouse.setStatus(RentalHouseStatus.PENDING_AUDIT.code());
+        rentalHouse.setAuditStatus(RentalAuditStatus.PENDING.code());
+        return rentalHouseMapper.selectRentalHouseList(rentalHouse);
+    }
+
+    @Override
     public RentalHouse selectRentalHouseDetail(Long houseId, Long viewerId, boolean platformAdmin)
     {
         RentalHouse house = requireHouse(houseId);
         if (isTenantVisiblePublishedHouse(house) || platformAdmin || isOwnerOrAgent(house, viewerId)
                 || hasDealContract(houseId, viewerId))
         {
+            fillHouseImages(house);
             return house;
         }
         throw new ServiceException("当前房源不可见");
@@ -105,13 +129,16 @@ public class RentalHouseServiceImpl implements IRentalHouseService
     }
 
     @Override
+    @Transactional
     public int submitRentalHouse(RentalHouse rentalHouse, Long ownerId, String operator)
     {
         prepareNewHouse(rentalHouse, ownerId, operator);
         rentalHouse.setStatus(RentalHouseStatus.PENDING_AUDIT.code());
         rentalHouse.setAuditStatus(RentalAuditStatus.PENDING.code());
         rentalHouse.setAuditReason(null);
-        return insertRentalHouse(rentalHouse);
+        int rows = insertRentalHouse(rentalHouse);
+        saveHouseImages(rentalHouse);
+        return rows;
     }
 
     /**
@@ -183,6 +210,7 @@ public class RentalHouseServiceImpl implements IRentalHouseService
      * @return 结果
      */
     @Override
+    @Transactional
     public int cancelRentalHouse(Long houseId, RentalHouseCancelRequest request, Long ownerId, String operator)
     {
         RentalHouse house = requireOwnerHouse(houseId, ownerId);
@@ -197,8 +225,12 @@ public class RentalHouseServiceImpl implements IRentalHouseService
         update.setAiIndexStatus("0");
         update.setRemark(request == null ? null : request.getCancelReason());
         update.setUpdateBy(operator);
-        // TODO 对接AI向量索引任务：房源下架后创建delete任务，确保RAG不可检索。
-        return updateRentalHouse(update);
+        int rows = updateRentalHouse(update);
+        if (rows > 0)
+        {
+            enqueueHouseIndexTask(houseId, "delete", "房源已下架，等待向量库删除任务处理");
+        }
+        return rows;
     }
 
     /**
@@ -210,6 +242,7 @@ public class RentalHouseServiceImpl implements IRentalHouseService
      * @return 结果
      */
     @Override
+    @Transactional
     public int auditRentalHouse(Long houseId, RentalHouseAuditRequest request, String operator)
     {
         RentalHouse house = requireHouse(houseId);
@@ -236,14 +269,18 @@ public class RentalHouseServiceImpl implements IRentalHouseService
         {
             update.setStatus(RentalHouseStatus.PUBLISHED.code());
             update.setAiIndexStatus("0");
-            // TODO 对接AI向量索引任务：审核通过后创建upsert任务，让RAG可检索最新房源。
         }
         else
         {
             update.setStatus(RentalHouseStatus.REJECTED.code());
             update.setAiIndexStatus("0");
         }
-        return updateRentalHouse(update);
+        int rows = updateRentalHouse(update);
+        if (rows > 0 && auditStatus == RentalAuditStatus.PASSED)
+        {
+            enqueueHouseIndexTask(houseId, "upsert", "房源审核通过，等待向量库同步最新房源内容");
+        }
+        return rows;
     }
 
     /**
@@ -271,19 +308,8 @@ public class RentalHouseServiceImpl implements IRentalHouseService
 
         entrust.setHouseId(houseId);
         entrust.setOwnerId(house.getOwnerId());
-        entrust.setStatus("0");
+        entrust.setStatus(RentalEntrustStatus.PENDING.code());
         rentalHouseEntrustService.insertRentalHouseEntrust(entrust);
-
-        RentalHouse update = new RentalHouse();
-        update.setHouseId(houseId);
-        update.setOperationMode(RentalOperationMode.AGENT_ENTRUST.code());
-        update.setAgentId(entrust.getAgentId());
-        update.setStatus(house.getStatus());
-        update.setAuditStatus(house.getAuditStatus());
-        update.setAuditReason(null);
-        update.setAiIndexStatus("0");
-        update.setUpdateBy(operator);
-        updateRentalHouse(update);
         // TODO 对接中介通知/站内信：提示中介确认委托范围、佣金和起止时间。
         return entrust;
     }
@@ -326,7 +352,7 @@ public class RentalHouseServiceImpl implements IRentalHouseService
         update.setUpdateBy(operator);
         updateRentalHouse(update);
         // TODO 对接支付/交付确认：根据押金、租金支付结果将合同从待签/草稿推进到生效。
-        // TODO 对接AI向量索引任务：成交后创建delete任务，主页和RAG不再展示该房源。
+        enqueueHouseIndexTask(houseId, "delete", "房源已成交，等待向量库删除任务处理");
         return contract;
     }
 
@@ -416,6 +442,42 @@ public class RentalHouseServiceImpl implements IRentalHouseService
         return house;
     }
 
+    private void saveHouseImages(RentalHouse house)
+    {
+        if (house == null || house.getHouseId() == null || StringUtils.isEmpty(house.getImageUrls()))
+        {
+            return;
+        }
+        List<String> urls = Arrays.stream(house.getImageUrls().split(","))
+                .map(String::trim)
+                .filter(StringUtils::isNotEmpty)
+                .collect(Collectors.toList());
+        for (int index = 0; index < urls.size(); index++)
+        {
+            RentalHouseImage image = new RentalHouseImage();
+            image.setHouseId(house.getHouseId());
+            image.setImageUrl(urls.get(index));
+            image.setImageType(index == 0 ? "1" : "0");
+            image.setSortNo((long) index);
+            rentalHouseImageService.insertRentalHouseImage(image);
+        }
+    }
+
+    private void fillHouseImages(RentalHouse house)
+    {
+        if (house == null || house.getHouseId() == null)
+        {
+            return;
+        }
+        RentalHouseImage query = new RentalHouseImage();
+        query.setHouseId(house.getHouseId());
+        String imageUrls = rentalHouseImageService.selectRentalHouseImageList(query).stream()
+                .map(RentalHouseImage::getImageUrl)
+                .filter(StringUtils::isNotEmpty)
+                .collect(Collectors.joining(","));
+        house.setImageUrls(imageUrls);
+    }
+
     private RentalHouse requireOwnerHouse(Long houseId, Long ownerId)
     {
         RentalHouse house = requireHouse(houseId);
@@ -482,6 +544,18 @@ public class RentalHouseServiceImpl implements IRentalHouseService
         contract.setStatus("1");
         // TODO 合同层完善：合同编号规则、电子签章、租期合法性、租金押金校验、交付验收单。
         return contract;
+    }
+
+    private void enqueueHouseIndexTask(Long houseId, String action, String message)
+    {
+        AiVectorIndexTask task = new AiVectorIndexTask();
+        task.setSourceType("house");
+        task.setSourceId(houseId);
+        task.setAction(action);
+        task.setStatus("0");
+        task.setRetryCount(0L);
+        task.setErrorMsg(message);
+        aiVectorIndexTaskService.insertAiVectorIndexTask(task);
     }
 
     private String defaultContractNo(Long houseId)

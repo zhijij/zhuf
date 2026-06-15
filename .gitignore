@@ -1,5 +1,6 @@
 .idea/
 .vscode/
+.vs/
 *.iml
 *.iws
 *.ipr
@@ -8,6 +9,7 @@
 *.njsproj
 *.sln
 *.local
+.env
 
 .DS_Store
 Thumbs.db
@@ -24,6 +26,7 @@ tests/e2e/reports/
 selenium-debug.log
 
 target/
+__pycache__/
 .gradle/
 build/
 !gradle/wrapper/gradle-wrapper.jar

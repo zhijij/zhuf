@@ -15,6 +15,14 @@ export function getHouseBusinessDetail(houseId) {
   })
 }
 
+export function listAuditHouse(query) {
+  return request({
+    url: '/system/house/audit-queue',
+    method: 'get',
+    params: query
+  })
+}
+
 export function submitHouse(data) {
   return request({
     url: '/system/house/submit',

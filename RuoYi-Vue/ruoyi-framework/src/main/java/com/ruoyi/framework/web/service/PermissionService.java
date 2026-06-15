@@ -146,6 +146,38 @@ public class PermissionService
     }
 
     /**
+     * 验证用户是否具有以下任意一个精确角色。
+     * 业务端用它区分超级管理员和租赁业务角色，避免 admin 账号被当成所有业务角色。
+     *
+     * @param roles 以 ROLE_DELIMITER 为分隔符的角色列表
+     * @return 用户是否具有以下任意一个精确角色
+     */
+    public boolean hasAnyExactRoles(String roles)
+    {
+        if (StringUtils.isEmpty(roles))
+        {
+            return false;
+        }
+        LoginUser loginUser = SecurityUtils.getLoginUser();
+        if (StringUtils.isNull(loginUser) || CollectionUtils.isEmpty(loginUser.getUser().getRoles()))
+        {
+            return false;
+        }
+        for (SysRole sysRole : loginUser.getUser().getRoles())
+        {
+            String roleKey = sysRole.getRoleKey();
+            for (String role : roles.split(Constants.ROLE_DELIMITER))
+            {
+                if (StringUtils.equals(roleKey, StringUtils.trim(role)))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * 判断是否包含权限
      * 
      * @param permissions 权限列表

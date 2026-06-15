@@ -16,6 +16,13 @@ export function createOwnerHouse(data) {
   })
 }
 
+export function getOwnerHouse(houseId) {
+  return request({
+    url: `/rental/owner/houses/${houseId}`,
+    method: 'get'
+  })
+}
+
 export function submitOwnerHouseAudit(houseId) {
   return request({
     url: `/rental/owner/houses/${houseId}/submit-audit`,
@@ -36,5 +43,27 @@ export function listOwnerEntrusts(query) {
     url: '/rental/owner/entrusts',
     method: 'get',
     params: query
+  })
+}
+
+export function listOwnerEntrustApplications(query) {
+  return request({
+    url: '/rental/owner/entrust-applications',
+    method: 'get',
+    params: query
+  })
+}
+
+export function confirmOwnerEntrust(entrustId) {
+  return request({
+    url: `/rental/owner/entrusts/${entrustId}/confirm`,
+    method: 'post'
+  })
+}
+
+export function rejectOwnerEntrust(entrustId) {
+  return request({
+    url: `/rental/owner/entrusts/${entrustId}/reject`,
+    method: 'post'
   })
 }

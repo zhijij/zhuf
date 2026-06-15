@@ -285,6 +285,34 @@ CREATE TABLE IF NOT EXISTS ai_tool_audit_log (
   PRIMARY KEY (log_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI工具调用审计表';
 
+-- 普通管理员/审核员：只负责房源合规审核，不进入超级管理员业务逻辑。
+INSERT INTO sys_role
+    (role_name, role_key, role_sort, data_scope, menu_check_strictly, dept_check_strictly,
+     status, del_flag, create_by, create_time, update_by, update_time, remark)
+SELECT '普通管理员/审核员', 'auditor', 6, '2', 1, 1, '0', '0', 'admin', SYSDATE(), '', NULL, '房源合规审核员角色'
+FROM dual
+WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE role_key = 'auditor');
+
+-- 审核员演示账号。默认密码：admin123。
+INSERT INTO sys_user
+    (dept_id, user_name, nick_name, user_type, email, phonenumber, sex, avatar, password,
+     status, del_flag, login_ip, login_date, pwd_update_date, create_by, create_time,
+     update_by, update_time, remark)
+SELECT 105, 'auditor_test', '房源审核员', '00', 'auditor@test.local', '15000000004', '0', '',
+       '$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2',
+       '0', '0', '127.0.0.1', SYSDATE(), SYSDATE(), 'admin', SYSDATE(), '', NULL, '普通管理员/房源审核员账号'
+FROM dual
+WHERE NOT EXISTS (SELECT 1 FROM sys_user WHERE user_name = 'auditor_test');
+
+INSERT INTO sys_user_role (user_id, role_id)
+SELECT u.user_id, r.role_id
+FROM sys_user u
+JOIN sys_role r ON r.role_key = 'auditor'
+WHERE u.user_name = 'auditor_test'
+  AND NOT EXISTS (
+    SELECT 1 FROM sys_user_role ur WHERE ur.user_id = u.user_id AND ur.role_id = r.role_id
+  );
+
 -- 房源合法性审核按钮权限：分配给普通管理员角色使用，超级管理员只监督不执行业务审核。
 INSERT INTO sys_menu (
   menu_name, parent_id, order_num, path, component, query, route_name,
@@ -299,4 +327,13 @@ FROM sys_menu m
 WHERE m.perms = 'system:house:list'
   AND NOT EXISTS (
     SELECT 1 FROM sys_menu x WHERE x.perms = 'system:house:audit'
+  );
+
+INSERT INTO sys_role_menu (role_id, menu_id)
+SELECT r.role_id, m.menu_id
+FROM sys_role r
+JOIN sys_menu m ON m.perms = 'system:house:audit'
+WHERE r.role_key = 'auditor'
+  AND NOT EXISTS (
+    SELECT 1 FROM sys_role_menu rm WHERE rm.role_id = r.role_id AND rm.menu_id = m.menu_id
   );

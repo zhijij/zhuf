@@ -42,6 +42,14 @@ public interface IRentalHouseService
     public List<RentalHouse> selectPublicRentalHouseList(RentalHouse rentalHouse);
 
     /**
+     * 查询管理员房源合规审核队列。
+     *
+     * @param rentalHouse 查询条件
+     * @return 待审核房源集合
+     */
+    public List<RentalHouse> selectAuditRentalHouseList(RentalHouse rentalHouse);
+
+    /**
      * 查询房源详情，已成交/下架房源仅对相关方和后台可见。
      *
      * @param houseId 房源ID

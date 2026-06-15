@@ -1,10 +1,13 @@
 package com.ruoyi.framework.web.service;
 
+import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 import com.ruoyi.common.constant.CacheConstants;
 import com.ruoyi.common.constant.Constants;
 import com.ruoyi.common.constant.UserConstants;
+import com.ruoyi.common.core.domain.entity.SysRole;
 import com.ruoyi.common.core.domain.entity.SysUser;
 import com.ruoyi.common.core.domain.model.RegisterBody;
 import com.ruoyi.common.core.redis.RedisCache;
@@ -16,7 +19,10 @@ import com.ruoyi.common.utils.SecurityUtils;
 import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.framework.manager.AsyncManager;
 import com.ruoyi.framework.manager.factory.AsyncFactory;
+import com.ruoyi.system.domain.RentalOwnerProfile;
 import com.ruoyi.system.service.ISysConfigService;
+import com.ruoyi.system.service.IRentalOwnerProfileService;
+import com.ruoyi.system.service.ISysRoleService;
 import com.ruoyi.system.service.ISysUserService;
 
 /**
@@ -36,9 +42,16 @@ public class SysRegisterService
     @Autowired
     private RedisCache redisCache;
 
+    @Autowired
+    private ISysRoleService roleService;
+
+    @Autowired
+    private IRentalOwnerProfileService rentalOwnerProfileService;
+
     /**
      * 注册
      */
+    @Transactional(rollbackFor = Exception.class)
     public String register(RegisterBody registerBody)
     {
         String msg = "", username = registerBody.getUsername(), password = registerBody.getPassword();
@@ -76,17 +89,57 @@ public class SysRegisterService
         }
         else
         {
-            sysUser.setNickName(username);
-            sysUser.setPwdUpdateDate(DateUtils.getNowDate());
-            sysUser.setPassword(SecurityUtils.encryptPassword(password));
-            boolean regFlag = userService.registerUser(sysUser);
-            if (!regFlag)
+            if (StringUtils.isNotEmpty(registerBody.getPhonenumber()))
             {
-                msg = "注册失败,请联系系统管理人员";
+                sysUser.setPhonenumber(registerBody.getPhonenumber());
+                if (!userService.checkPhoneUnique(sysUser))
+                {
+                    msg = "保存用户'" + username + "'失败，手机号已存在";
+                }
             }
-            else
+            if (StringUtils.isEmpty(msg) && StringUtils.isNotEmpty(registerBody.getEmail()))
             {
-                AsyncManager.me().execute(AsyncFactory.recordLogininfor(username, Constants.REGISTER, MessageUtils.message("user.register.success")));
+                sysUser.setEmail(registerBody.getEmail());
+                if (!userService.checkEmailUnique(sysUser))
+                {
+                    msg = "保存用户'" + username + "'失败，邮箱已存在";
+                }
+            }
+            if (StringUtils.isEmpty(msg) && StringUtils.isEmpty(registerBody.getRegisterRole()))
+            {
+                msg = "请选择注册身份";
+            }
+            if (StringUtils.isEmpty(msg) && !isSupportedRegisterRole(registerBody.getRegisterRole()))
+            {
+                msg = "当前注册身份不受支持";
+            }
+            if (StringUtils.isEmpty(msg))
+            {
+                sysUser.setNickName(StringUtils.isNotEmpty(registerBody.getNickName()) ? registerBody.getNickName() : username);
+                sysUser.setEmail(registerBody.getEmail());
+                sysUser.setPhonenumber(registerBody.getPhonenumber());
+                sysUser.setPwdUpdateDate(DateUtils.getNowDate());
+                sysUser.setPassword(SecurityUtils.encryptPassword(password));
+                Long roleId = resolveRoleId(registerBody.getRegisterRole());
+                if (roleId == null)
+                {
+                    return "注册身份不存在，请先初始化业务角色";
+                }
+                sysUser.setRoleIds(new Long[] { roleId });
+                boolean regFlag = userService.registerUser(sysUser);
+                if (!regFlag)
+                {
+                    msg = "注册失败,请联系系统管理人员";
+                }
+                else
+                {
+                    userService.insertUserAuth(sysUser.getUserId(), new Long[] { roleId });
+                    if (StringUtils.equals(registerBody.getRegisterRole(), "owner"))
+                    {
+                        createOwnerProfile(sysUser.getUserId(), registerBody);
+                    }
+                    AsyncManager.me().execute(AsyncFactory.recordLogininfor(username, Constants.REGISTER, MessageUtils.message("user.register.success")));
+                }
             }
         }
         return msg;
@@ -113,5 +166,39 @@ public class SysRegisterService
         {
             throw new CaptchaException();
         }
+    }
+
+    private boolean isSupportedRegisterRole(String roleKey)
+    {
+        return StringUtils.equalsAnyIgnoreCase(roleKey, "user", "owner", "agent");
+    }
+
+    private Long resolveRoleId(String roleKey)
+    {
+        List<SysRole> roles = roleService.selectRoleAll();
+        for (SysRole role : roles)
+        {
+            if (StringUtils.equals(roleKey, role.getRoleKey()))
+            {
+                return role.getRoleId();
+            }
+        }
+        return null;
+    }
+
+    private void createOwnerProfile(Long userId, RegisterBody registerBody)
+    {
+        RentalOwnerProfile exists = rentalOwnerProfileService.selectRentalOwnerProfileByOwnerId(userId);
+        if (exists != null)
+        {
+            return;
+        }
+        RentalOwnerProfile profile = new RentalOwnerProfile();
+        profile.setOwnerId(userId);
+        profile.setRealName(StringUtils.defaultIfEmpty(registerBody.getRealName(), registerBody.getNickName()));
+        profile.setContactPhone(registerBody.getPhonenumber());
+        profile.setVerifyStatus("0");
+        profile.setVerifyReason("注册创建，待补充完整户主实名资料");
+        rentalOwnerProfileService.insertRentalOwnerProfile(profile);
     }
 }

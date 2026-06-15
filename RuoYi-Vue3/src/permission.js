@@ -18,6 +18,29 @@ const isWhiteList = (path) => {
   return whiteList.some(pattern => isPathMatch(pattern, path))
 }
 
+const getHomeByRoles = (roles = []) => {
+  if (roles.includes('admin')) return '/index'
+  if (roles.includes('auditor')) return '/portal/auditor'
+  return '/portal/index'
+}
+const isPortalRoute = (path = '') => path.startsWith('/portal')
+const businessSafeRoutes = ['/portal/index', '/portal/auditor', '/login', '/register', '/401', '/404', '/lock']
+const shouldRedirectBusinessUser = (roles = [], path = '') => {
+  if (!roles.length || roles.includes('admin')) {
+    return false
+  }
+  return !(isPortalRoute(path) || businessSafeRoutes.includes(path))
+}
+const shouldRedirectAuditor = (roles = [], to = {}) => {
+  return roles.includes('auditor') && to.path === '/portal/index' && to.query?.entry !== 'audit'
+}
+const shouldBlockAuditorWorkbench = (roles = [], path = '') => {
+  return path === '/portal/auditor' && !roles.includes('auditor')
+}
+const shouldRedirectSuperAdminFromPortal = (roles = [], path = '') => {
+  return roles.includes('admin') && !roles.includes('auditor') && isPortalRoute(path)
+}
+
 router.beforeEach(async (to, from) => {
   NProgress.start()
   if (getToken()) {
@@ -25,7 +48,7 @@ router.beforeEach(async (to, from) => {
     const isLock = useLockStore().isLock
     if (to.path === '/login') {
       NProgress.done()
-      return { path: '/' }
+      return { path: useUserStore().roles.length ? getHomeByRoles(useUserStore().roles) : '/' }
     }
     if (isWhiteList(to.path)) {
       return true
@@ -51,13 +74,43 @@ router.beforeEach(async (to, from) => {
             router.addRoute(route)
           }
         })
+        const roles = useUserStore().roles || []
+        if (shouldRedirectSuperAdminFromPortal(roles, to.path)) {
+          return { path: '/index', replace: true }
+        }
+        if (shouldBlockAuditorWorkbench(roles, to.path)) {
+          return { path: '/portal/index', replace: true }
+        }
+        if (shouldRedirectAuditor(roles, to)) {
+          return { path: '/portal/auditor', replace: true }
+        }
+        if (shouldRedirectBusinessUser(roles, to.path)) {
+          return { path: getHomeByRoles(roles), replace: true }
+        }
         // 重新导航到目标路由，确保动态路由已注册
         return { ...to, replace: true }
       } catch (err) {
         await useUserStore().logOut()
         ElMessage.error(err)
-        return { path: '/' }
+        return { path: '/login' }
       }
+    }
+    const roles = useUserStore().roles || []
+    if (shouldRedirectSuperAdminFromPortal(roles, to.path)) {
+      NProgress.done()
+      return { path: '/index' }
+    }
+    if (shouldBlockAuditorWorkbench(roles, to.path)) {
+      NProgress.done()
+      return { path: '/portal/index' }
+    }
+    if (shouldRedirectAuditor(roles, to)) {
+      NProgress.done()
+      return { path: '/portal/auditor' }
+    }
+    if (shouldRedirectBusinessUser(roles, to.path)) {
+      NProgress.done()
+      return { path: getHomeByRoles(roles) }
     }
     return true
   } else {

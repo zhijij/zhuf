@@ -16,7 +16,6 @@ import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.core.controller.BaseController;
 import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.enums.BusinessType;
-import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.common.utils.SecurityUtils;
 import com.ruoyi.system.domain.RentalHouse;
 import com.ruoyi.system.domain.RentalHouseEntrust;
@@ -48,7 +47,7 @@ public class RentalHouseController extends BaseController
      * 所有角色查看公开房源列表。
      * 已出租、下架、待审核、驳回房源不会出现在主页/RAG检索列表。
      */
-    @PreAuthorize("@ss.hasAnyRoles('admin,user,owner,agent')")
+    @PreAuthorize("@ss.hasAnyRoles('admin') or @ss.hasAnyExactRoles('auditor,user,owner,agent')")
     @GetMapping("/public-list")
     public TableDataInfo publicList(RentalHouse rentalHouse)
     {
@@ -61,7 +60,7 @@ public class RentalHouseController extends BaseController
      * 所有角色查看房源详情。
      * 非公开房源仅房东、中介、成交租户、后台管理员/超级管理员可见。
      */
-    @PreAuthorize("@ss.hasAnyRoles('admin,user,owner,agent')")
+    @PreAuthorize("@ss.hasAnyRoles('admin') or @ss.hasAnyExactRoles('auditor,user,owner,agent')")
     @GetMapping("/detail/{houseId}")
     public AjaxResult detail(@PathVariable("houseId") Long houseId)
     {
@@ -70,9 +69,21 @@ public class RentalHouseController extends BaseController
     }
 
     /**
+     * 管理员查看房源合规审核队列。
+     */
+    @PreAuthorize("@ss.hasAnyExactRoles('auditor')")
+    @GetMapping("/audit-queue")
+    public TableDataInfo auditQueue(RentalHouse rentalHouse)
+    {
+        startPage();
+        List<RentalHouse> list = rentalHouseService.selectAuditRentalHouseList(rentalHouse);
+        return getDataTable(list);
+    }
+
+    /**
      * 用户提交房源，进入待审核状态。
      */
-    @PreAuthorize("@ss.hasAnyRoles('admin,owner')")
+    @PreAuthorize("@ss.hasAnyExactRoles('owner')")
     @Log(title = "房源提交", businessType = BusinessType.INSERT)
     @PostMapping("/submit")
     public AjaxResult submit(@RequestBody RentalHouse rentalHouse)
@@ -83,7 +94,7 @@ public class RentalHouseController extends BaseController
     /**
      * 用户在申请成功前修改房源信息。
      */
-    @PreAuthorize("@ss.hasAnyRoles('admin,owner')")
+    @PreAuthorize("@ss.hasAnyExactRoles('owner')")
     @Log(title = "房源审核前修改", businessType = BusinessType.UPDATE)
     @PutMapping("/{houseId}/before-approval")
     public AjaxResult editBeforeApproval(@PathVariable("houseId") Long houseId, @RequestBody RentalHouse rentalHouse)
@@ -94,7 +105,7 @@ public class RentalHouseController extends BaseController
     /**
      * 用户修改驳回房源后再次提交审核。
      */
-    @PreAuthorize("@ss.hasAnyRoles('admin,owner')")
+    @PreAuthorize("@ss.hasAnyExactRoles('owner')")
     @Log(title = "房源重新提交审核", businessType = BusinessType.UPDATE)
     @PostMapping("/{houseId}/resubmit")
     public AjaxResult resubmit(@PathVariable("houseId") Long houseId)
@@ -105,7 +116,7 @@ public class RentalHouseController extends BaseController
     /**
      * 用户取消申请或下架房源。
      */
-    @PreAuthorize("@ss.hasAnyRoles('admin,owner')")
+    @PreAuthorize("@ss.hasAnyExactRoles('owner')")
     @Log(title = "房源取消/下架", businessType = BusinessType.UPDATE)
     @PostMapping("/{houseId}/cancel")
     public AjaxResult cancel(@PathVariable("houseId") Long houseId, @RequestBody(required = false) RentalHouseCancelRequest request)
@@ -114,24 +125,20 @@ public class RentalHouseController extends BaseController
     }
 
     /**
-     * 非超级管理员审核房源。
+     * 管理员审核房源。
      */
-    @PreAuthorize("@ss.hasPermi('system:house:audit')")
+    @PreAuthorize("@ss.hasAnyExactRoles('auditor')")
     @Log(title = "房源合法性审核", businessType = BusinessType.UPDATE)
     @PostMapping("/{houseId}/audit")
     public AjaxResult audit(@PathVariable("houseId") Long houseId, @RequestBody RentalHouseAuditRequest request)
     {
-        if (SecurityUtils.isAdmin())
-        {
-            throw new ServiceException("超级管理员不参与业务审核，请使用普通管理员账号审核");
-        }
         return toAjax(rentalHouseService.auditRentalHouse(houseId, request, getUsername()));
     }
 
     /**
      * 房东将房源交给中介委托代理。
      */
-    @PreAuthorize("@ss.hasAnyRoles('admin,owner')")
+    @PreAuthorize("@ss.hasAnyExactRoles('owner')")
     @Log(title = "房源委托中介", businessType = BusinessType.UPDATE)
     @PostMapping("/{houseId}/entrust")
     public AjaxResult entrust(@PathVariable("houseId") Long houseId, @RequestBody RentalHouseEntrust entrust)
@@ -142,13 +149,12 @@ public class RentalHouseController extends BaseController
     /**
      * 租户与中介/房东完成交易，房源从公开列表和RAG检索中移除。
      */
-    @PreAuthorize("@ss.hasAnyRoles('admin,owner,agent')")
+    @PreAuthorize("@ss.hasAnyExactRoles('owner,agent')")
     @Log(title = "房源成交", businessType = BusinessType.UPDATE)
     @PostMapping("/{houseId}/deal")
     public AjaxResult completeDeal(@PathVariable("houseId") Long houseId, @RequestBody RentalHouseDealRequest request)
     {
-        boolean platformAdmin = SecurityUtils.isAdmin() || SecurityUtils.hasRole("admin");
-        return success(rentalHouseService.completeRentalHouseDeal(houseId, request, getUserId(), getUsername(), platformAdmin));
+        return success(rentalHouseService.completeRentalHouseDeal(houseId, request, getUserId(), getUsername(), false));
     }
 
     /**

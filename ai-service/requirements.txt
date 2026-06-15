@@ -2,3 +2,7 @@ fastapi
 uvicorn[standard]
 pydantic
 httpx
+psycopg[binary]
+langchain
+langchain-core
+langchain-openai

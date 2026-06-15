@@ -1,9 +1,11 @@
 package com.ruoyi.web.controller.rental;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -46,7 +48,7 @@ public class RentalPortalController extends BaseController
         return AjaxResult.success(rentalHouseService.selectRentalHouseDetail(houseId, currentUserIdOrNull(), isPlatformAdmin()));
     }
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,user,tenant')")
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant')")
     @Log(title = "门户提交看房预约", businessType = BusinessType.INSERT)
     @PostMapping("/appointments")
     public AjaxResult createAppointment(@RequestBody RentalAppointment rentalAppointment)
@@ -54,7 +56,7 @@ public class RentalPortalController extends BaseController
         return toAjax(rentalAppointmentService.createTenantAppointment(rentalAppointment, SecurityUtils.getUserId()));
     }
 
-    @PreAuthorize("@ss.hasAnyRoles('admin,user,tenant')")
+    @PreAuthorize("@ss.hasAnyExactRoles('user,tenant')")
     @Log(title = "门户取消看房预约", businessType = BusinessType.UPDATE)
     @PostMapping("/appointments/{appointmentId}/cancel")
     public AjaxResult cancelAppointment(@PathVariable Long appointmentId, @RequestBody(required = false) RentalAppointmentActionRequest request)
@@ -67,11 +69,28 @@ public class RentalPortalController extends BaseController
     public AjaxResult summary()
     {
         RentalHouse houseQuery = new RentalHouse();
-        int houseCount = rentalHouseService.selectPublicRentalHouseList(houseQuery).size();
+        List<RentalHouse> houses = rentalHouseService.selectPublicRentalHouseList(houseQuery);
+        int houseCount = houses.size();
+        long pricedHouseCount = houses.stream()
+                .map(RentalHouse::getRentAmount)
+                .filter(Objects::nonNull)
+                .count();
+        BigDecimal totalRent = houses.stream()
+                .map(RentalHouse::getRentAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal avgRent = pricedHouseCount == 0
+                ? BigDecimal.ZERO
+                : totalRent.divide(BigDecimal.valueOf(pricedHouseCount), 2, RoundingMode.HALF_UP);
+        long indexedHouseCount = houses.stream()
+                .filter(item -> "1".equals(item.getAiIndexStatus()))
+                .count();
 
         Map<String, Object> summary = new HashMap<>();
         summary.put("houseCount", houseCount);
-        summary.put("avgRent", BigDecimal.ZERO);
+        summary.put("pricedHouseCount", pricedHouseCount);
+        summary.put("avgRent", avgRent);
+        summary.put("indexedHouseCount", indexedHouseCount);
         return AjaxResult.success(summary);
     }
 

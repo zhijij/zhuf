@@ -1,0 +1,26 @@
+ruoyi:
+  profile: /home/ruoyi/uploadPath
+
+spring:
+  data:
+    redis:
+      host: redis
+      port: 6379
+      database: 0
+      password: ${REDIS_PASSWORD:2972515097Fzh/}
+      timeout: 10s
+
+ai:
+  service:
+    base-url: http://ai-service:8000
+
+storage:
+  provider: ${STORAGE_PROVIDER:local}
+
+tencent:
+  cos:
+    secret-id: ${TENCENT_COS_SECRET_ID:}
+    secret-key: ${TENCENT_COS_SECRET_KEY:}
+    region: ${TENCENT_COS_REGION:ap-chengdu}
+    bucket-name: ${TENCENT_COS_BUCKET:document-1419823100}
+    presigned-expiration-seconds: ${TENCENT_COS_PRESIGNED_EXPIRATION_SECONDS:43200}

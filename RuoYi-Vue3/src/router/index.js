@@ -47,23 +47,18 @@ export const constantRoutes = [
     ]
   },
   {
-    path: '/portal',
-    component: Layout,
-    redirect: '/portal/index',
-    children: [
-      {
-        path: 'business-test',
-        component: () => import('@/views/portal/business-test.vue'),
-        name: 'RentalBusinessTest',
-        meta: { title: '租赁业务测试台', icon: 'list' }
-      },
-      {
-        path: 'index',
-        component: () => import('@/views/portal/index.vue'),
-        name: 'PortalHome',
-        meta: { title: '业务门户', icon: 'guide' }
-      }
-    ]
+    path: '/portal/index',
+    component: () => import('@/views/portal/index.vue'),
+    name: 'PortalHome',
+    hidden: true,
+    meta: { title: '业务工作台' }
+  },
+  {
+    path: '/portal/auditor',
+    component: () => import('@/views/portal/auditor.vue'),
+    name: 'AuditorWorkbench',
+    hidden: true,
+    meta: { title: '审核工作台' }
   },
   {
     path: '/lock',

@@ -13,4 +13,6 @@ public interface IBizChatService
     List<BizChatMessage> listMessages(Long sessionId);
 
     BizChatMessage sendMessage(Long sessionId, String content, String messageType);
+
+    BizChatMessage sendSystemMessage(String bizType, Long bizId, String content);
 }
