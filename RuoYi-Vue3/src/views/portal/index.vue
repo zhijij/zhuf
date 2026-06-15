@@ -496,139 +496,30 @@
       </template>
     </el-drawer>
 
-    <el-drawer
+    <AiConsoleDrawer
       v-model="aiConsoleOpen"
-      title="AI 工作台"
-      size="900px"
-      append-to-body
-      destroy-on-close
-      class="ai-console-drawer"
-      @opened="refreshAiConsole"
-    >
-      <section class="ai-console-shell">
-        <header class="ai-console-head">
-          <div>
-            <span>审核员工具</span>
-            <h2>向量知识库与索引任务</h2>
-            <p>AI 运维、房源索引和审核辅助放在这里，普通业务页面只保留当前角色的下一步动作。</p>
-          </div>
-          <div class="ai-console-status">
-            <i :class="{ online: aiCapabilities.online }"></i>
-            <strong>{{ aiCapabilities.online ? 'AI 在线' : 'AI 待检测' }}</strong>
-          </div>
-        </header>
-
-        <div class="summary-strip console-summary">
-          <span>公开房源 {{ workspaceSummary.houseCount || 0 }}</span>
-          <span>已定价 {{ workspaceSummary.pricedHouseCount || 0 }}</span>
-          <span>平均租金 {{ workspaceSummary.avgRent || 0 }}</span>
-          <span>已索引 {{ workspaceSummary.indexedHouseCount || 0 }}</span>
-          <span>知识库 {{ aiCapabilities.indexedKnowledge || 0 }}</span>
-          <span v-for="chip in aiCapabilityChips" :key="chip">{{ chip }}</span>
-        </div>
-
-        <div class="console-actions">
-          <el-button plain @click="refreshAiConsole">刷新状态</el-button>
-          <el-button v-if="selected?.houseId" plain @click="inspectAiHouseDocumentFromSelected">检查当前房源文档</el-button>
-          <el-button v-if="selected?.houseId" type="primary" plain @click="createAiIndexTaskFromSelected">当前房源入库</el-button>
-          <el-button v-if="canRunFullAiSync" type="warning" plain @click="createFullAiIndexTask">全量同步索引</el-button>
-          <el-button type="success" plain @click="processPendingAiTasks">批量处理索引</el-button>
-          <el-button :loading="knowledgeSeeding" type="primary" plain @click="seedKnowledgeBase">导入基础知识</el-button>
-        </div>
-
-        <div class="mini-grid ai-status-grid">
-          <article class="mini-card">
-            <strong>能力状态</strong>
-            <p>{{ aiCapabilities.vectorStore || 'PostgreSQL + pgvector' }} / {{ aiCapabilities.embeddingMode || '未检测' }}</p>
-            <p>Skill {{ aiCapabilities.skills.length }} 个，Tool {{ aiCapabilities.tools.length }} 个</p>
-          </article>
-          <article class="mini-card">
-            <strong>统一知识库</strong>
-            <p>已入库 {{ aiCapabilities.indexedKnowledge || 0 }} 份知识文档</p>
-            <p>{{ knowledgeSourceText }}</p>
-          </article>
-          <article v-if="latestAiTask" class="mini-card">
-            <strong>最新索引任务</strong>
-            <p>#{{ latestAiTask.taskId }} / {{ taskStatusLabel(latestAiTask.status) }}</p>
-            <p>{{ latestAiTask.errorMsg || '暂无任务说明' }}</p>
-          </article>
-          <article v-if="aiHouseDocument" class="mini-card">
-            <strong>当前房源文档</strong>
-            <p>{{ aiHouseDocument.message || '暂无文档状态' }}</p>
-            <p>索引状态：{{ aiIndexStatusLabel(aiHouseDocument.aiIndexStatus, aiHouseDocument.indexed) }}</p>
-          </article>
-        </div>
-
-        <section class="knowledge-card">
-          <div class="knowledge-card__head">
-            <div>
-              <strong>知识入库</strong>
-              <p>导入合同、政策、FAQ、聊天摘要或企业制度，AI 会在推荐、问答和审核辅助时检索这些内容。</p>
-            </div>
-            <el-tag effect="plain">RAG</el-tag>
-          </div>
-          <el-form label-position="top" class="knowledge-form">
-            <div class="knowledge-form__row">
-              <el-form-item label="来源类型">
-                <el-select v-model="knowledgeForm.sourceType">
-                  <el-option label="FAQ" value="faq" />
-                  <el-option label="政策" value="policy" />
-                  <el-option label="合同模板" value="contract" />
-                  <el-option label="聊天摘要" value="chat" />
-                  <el-option label="企业制度" value="enterprise" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="适用角色">
-                <el-select v-model="knowledgeForm.roles" multiple collapse-tags collapse-tags-tooltip>
-                  <el-option label="租户" value="tenant" />
-                  <el-option label="户主" value="owner" />
-                  <el-option label="中介" value="agent" />
-                  <el-option label="审核员" value="auditor" />
-                </el-select>
-              </el-form-item>
-            </div>
-            <el-form-item label="标题">
-              <el-input v-model="knowledgeForm.title" maxlength="80" show-word-limit placeholder="例如：押金退还规则 FAQ" />
-            </el-form-item>
-            <el-form-item label="正文">
-              <el-input
-                v-model="knowledgeForm.content"
-                type="textarea"
-                :rows="5"
-                resize="none"
-                maxlength="4000"
-                show-word-limit
-                placeholder="粘贴政策、合同条款、FAQ 答案、聊天摘要或企业制度正文"
-              />
-            </el-form-item>
-            <div class="knowledge-actions">
-              <el-button :loading="knowledgeSubmitting" type="primary" @click="submitKnowledgeDocument">写入知识库</el-button>
-              <el-button plain @click="resetKnowledgeForm">清空</el-button>
-            </div>
-          </el-form>
-        </section>
-
-        <div class="table-shell compact-shell">
-          <el-table :data="aiIndexTasks" size="small">
-            <el-table-column prop="taskId" label="任务ID" width="96" />
-            <el-table-column prop="sourceId" label="房源ID" width="96" />
-            <el-table-column prop="action" label="动作" width="110" />
-            <el-table-column label="状态" width="110">
-              <template #default="{ row }">{{ taskStatusLabel(row.status) }}</template>
-            </el-table-column>
-            <el-table-column prop="errorMsg" label="任务说明" min-width="220" show-overflow-tooltip />
-            <el-table-column prop="createTime" label="创建时间" min-width="160" />
-            <el-table-column label="操作" width="96" fixed="right">
-              <template #default="{ row }">
-                <el-button link type="primary" :disabled="['1', '2'].includes(String(row.status))" @click="processAiTask(row)">
-                  处理
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </div>
-      </section>
-    </el-drawer>
+      v-model:knowledge-form="knowledgeForm"
+      :capabilities="aiCapabilities"
+      :workspace-summary="workspaceSummary"
+      :capability-chips="aiCapabilityChips"
+      :knowledge-source-text="knowledgeSourceText"
+      :latest-task="latestAiTask"
+      :house-document="aiHouseDocument"
+      :knowledge-submitting="knowledgeSubmitting"
+      :knowledge-seeding="knowledgeSeeding"
+      :index-tasks="aiIndexTasks"
+      :can-run-full-sync="canRunFullAiSync"
+      :selected-house-id="selected?.houseId"
+      @refresh="refreshAiConsole"
+      @inspect-house-document="inspectAiHouseDocumentFromSelected"
+      @create-house-index-task="createAiIndexTaskFromSelected"
+      @create-full-index-task="createFullAiIndexTask"
+      @process-pending-tasks="processPendingAiTasks"
+      @seed-knowledge="seedKnowledgeBase"
+      @submit-knowledge="submitKnowledgeDocument"
+      @reset-knowledge="resetKnowledgeForm"
+      @process-task="processAiTask"
+    />
 
     <BusinessChatDrawer
       v-model="chatOpen"
@@ -809,84 +700,47 @@
       </template>
     </el-dialog>
 
-    <div class="ai-quick-rail" :class="{ 'is-open': floatingAiOpen }">
-      <button class="rail-button" title="业务工具" @click="switchPage('business')">
-        <el-icon><Briefcase /></el-icon>
-      </button>
-      <button class="rail-button" title="消息中心" @click="openMessagePanel">
-        <el-icon><Headset /></el-icon>
-      </button>
-      <button class="rail-button ai-entry" title="AI 助手" @click="openFloatingAi">
-        <el-icon><Promotion /></el-icon>
-      </button>
-      <button class="rail-button" title="使用指南">
-        <el-icon><Document /></el-icon>
-      </button>
-    </div>
-
-    <section
-      v-if="floatingAiOpen"
-      class="ai-float-modal"
-      :style="{ left: `${floatingAiPosition.x}px`, top: `${floatingAiPosition.y}px` }"
-    >
-      <header class="ai-float-head" @pointerdown="startFloatingAiDrag">
-        <div>
-          <strong>Smart Agent</strong>
-          <span>业务智能体 · 可拖动</span>
-        </div>
-        <div class="ai-float-actions">
-          <button title="归位" @click.stop="resetFloatingAiPosition">
-            <el-icon><Aim /></el-icon>
-          </button>
-          <button title="收起" @click.stop="floatingAiOpen = false">
-            <el-icon><Close /></el-icon>
-          </button>
-        </div>
-      </header>
-
-      <div ref="floatingAiListRef" class="ai-float-body">
-        <div
-          v-for="(item, index) in floatingAiMessages"
-          :key="index"
-          :class="['ai-float-message', item.role]"
-        >
-          <div class="message-content">{{ item.content }}</div>
-          <div v-if="item.intentLabel || item.toolCalls?.length" class="ai-trace compact">
-            <span v-if="item.intentLabel">{{ item.intentLabel }}</span>
-            <span v-for="tool in item.toolCalls" :key="`${index}-${tool.name}`">{{ tool.label || tool.name }}</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="ai-float-presets">
-        <button v-for="item in floatingAiPresets" :key="item" @click="floatingAiInput = item">
-          {{ item }}
-        </button>
-      </div>
-
-      <footer class="ai-float-composer">
-        <el-input
-          v-model="floatingAiInput"
-          type="textarea"
-          :autosize="{ minRows: 1, maxRows: 4 }"
-          resize="none"
-          placeholder="问 AI 助手，Ctrl + Enter 发送"
-          @keydown.ctrl.enter.prevent="sendFloatingAiMessage"
-        />
-        <el-button circle type="primary" icon="Promotion" :loading="floatingAiLoading" @click="sendFloatingAiMessage" />
-      </footer>
-    </section>
+    <FloatingAiAssistant
+      v-model:open="floatingAiOpen"
+      v-model:input="floatingAiInput"
+      :loading="floatingAiLoading"
+      :messages="floatingAiMessages"
+      :presets="floatingAiPresets"
+      @open-business="switchPage('business')"
+      @open-messages="openMessagePanel"
+      @send="sendFloatingAiMessage"
+    />
   </div>
 </template>
 
 <script setup name="PortalHome">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Aim, ArrowDown, Briefcase, Close, Document, Headset, Promotion, Search } from '@element-plus/icons-vue'
+import { ArrowDown, Promotion, Search } from '@element-plus/icons-vue'
 import useUserStore from '@/store/modules/user'
 import BusinessChatDrawer from './components/BusinessChatDrawer.vue'
 import BusinessChatPanel from './components/BusinessChatPanel.vue'
+import AiConsoleDrawer from './components/AiConsoleDrawer.vue'
+import FloatingAiAssistant from './components/FloatingAiAssistant.vue'
+import {
+  aiAssistantProfiles,
+  businessAiCards,
+  floatingAiPresets,
+  knowledgeSourceLabels,
+  modeMeta,
+  quickTags,
+  roleConfig,
+  transactionConfigs
+} from './config'
+import {
+  formatMoney,
+  formatPercent,
+  formatValue,
+  intentionLevelLabel,
+  normalizeAiResponse,
+  normalizeAiResponsePayload
+} from './utils'
 import {
   listTenantHouses,
   getTenantHouse,
@@ -1032,59 +886,9 @@ const agentMessages = ref([])
 const floatingAiOpen = ref(false)
 const floatingAiLoading = ref(false)
 const floatingAiInput = ref('')
-const floatingAiListRef = ref(null)
-const floatingAiPosition = reactive({ x: 0, y: 0 })
-const floatingAiDrag = reactive({ active: false, offsetX: 0, offsetY: 0 })
 const floatingAiMessages = ref([
   { role: 'assistant', content: '我是右下角 AI 助手，可以随时协助找房推荐、合同摘要、房源文案和业务跟进。' }
 ])
-
-const transactionConfigs = {
-  ownerCreateHouse: { title: '新建房源', submitText: '提交审核' },
-  ownerSubmitAudit: { title: '重新提交审核', submitText: '重新提交', form: 'none' },
-  tenantAppointment: { title: '预约看房', submitText: '提交预约' },
-  tenantIntention: { title: '提交租赁意向', submitText: '提交意向' },
-  tenantDeal: { title: '成交申请', submitText: '提交申请', form: 'deal' },
-  ownerEntrust: { title: '发起委托', submitText: '发送邀请' },
-  agentApplyEntrust: { title: '申请承接', submitText: '提交申请' },
-  agentConfirmAppointment: { title: '确认预约', submitText: '确认预约', form: 'none' },
-  agentCompleteAppointment: { title: '完成看房', submitText: '完成看房', form: 'none' },
-  agentRejectAppointment: { title: '拒绝预约', submitText: '拒绝预约', form: 'reason', reasonLabel: '拒绝原因' },
-  agentFollowIntention: { title: '跟进意向', submitText: '保存跟进' },
-  agentInvalidIntention: { title: '标记意向无效', submitText: '标记无效', form: 'reason', reasonLabel: '无效原因' },
-  agentDealIntention: { title: '意向转成交', submitText: '确认成交', form: 'deal' },
-  agentDealHouse: { title: '确认房源成交', submitText: '确认成交', form: 'deal' },
-  contractSubmitSign: { title: '提交合同签署', submitText: '提交签署', form: 'none' },
-  contractTenantConfirm: { title: '租户确认合同', submitText: '确认合同', form: 'opinion' },
-  contractOwnerConfirm: { title: '户主确认合同', submitText: '确认合同', form: 'opinion' },
-  contractAgentConfirm: { title: '中介确认合同', submitText: '确认合同', form: 'opinion' },
-  contractReject: { title: '拒绝合同', submitText: '拒绝合同', form: 'opinion' },
-  contractActivate: { title: '合同生效', submitText: '确认生效', form: 'none' },
-  contractVoid: { title: '作废合同', submitText: '作废合同', form: 'reason', reasonLabel: '作废原因' },
-  contractTerminate: { title: '终止合同', submitText: '终止合同', form: 'reason', reasonLabel: '终止原因' },
-  contractOpinion: { title: '合同确认', submitText: '提交', form: 'opinion' },
-  adminApproveHouse: { title: '房源合规审核', submitText: '通过并发布', form: 'audit' },
-  adminRejectHouse: { title: '驳回房源', submitText: '确认驳回', form: 'audit' }
-}
-
-const roleConfig = {
-  admin: { title: '房源合规审核', eyebrow: '审核队列', actionTitle: '审核动作', actionHint: '审核员只处理房源合规性：通过后发布，驳回后记录原因。' },
-  tenant: { title: '租户找房', eyebrow: '推荐房源', actionTitle: '求租动作', actionHint: '收藏、预约、提交意向都在这里完成。' },
-  owner: { title: '户主委托', eyebrow: '我的房源', actionTitle: '委托动作', actionHint: '处理中介申请，或指定中介发起委托。' },
-  agent: { title: '中介拓客', eyebrow: '可承接房源', actionTitle: '承接动作', actionHint: '响应户主委托，也可以主动申请承接。' },
-  contract: { title: '合同协作', eyebrow: '合同队列', actionTitle: '合同动作', actionHint: '推进三方确认，拒绝时请填写处理意见。' }
-}
-
-const modeMeta = {
-  admin: { label: '合规审核', shortLabel: '审核' },
-  tenant: { label: '租户找房', shortLabel: '找房' },
-  owner: { label: '户主房源', shortLabel: '房源' },
-  agent: { label: '中介业务', shortLabel: '业务' },
-  contract: { label: '合同协作', shortLabel: '合同' }
-}
-
-const quickTags = ['整租', '可沟通', '待处理', '合同', '中介申请', '推荐房源']
-const floatingAiPresets = ['总结当前业务', '生成房源文案', '梳理合同风险']
 
 const roles = computed(() => userStore.roles || [])
 const isAdmin = computed(() => roles.value.includes('auditor'))
@@ -1125,86 +929,8 @@ const canManageContractLifecycle = computed(() => roles.value.includes('owner') 
 const transactionMeta = computed(() => transactionConfigs[transactionDialog.type] || { title: '业务处理', submitText: '提交', form: 'none' })
 const latestAiTask = computed(() => aiIndexTasks.value[0] || null)
 const detailDrawerTitle = computed(() => selected.value ? `${recordTypeLabel(selected.value)}详情` : '详情')
-const businessAiCard = computed(() => {
-  const cards = {
-    admin: {
-      title: 'AI 辅助合规审查',
-      description: '结合房源字段生成审核要点，结果只写入审核意见，最终通过或驳回仍由审核员确认。',
-      actionLabel: '生成审核意见'
-    },
-    tenant: {
-      title: 'AI 推荐房源',
-      description: '按预算、位置和当前房源上下文生成推荐摘要，房源详情仍从业务接口读取。',
-      actionLabel: '生成推荐'
-    },
-    owner: {
-      title: 'AI 房源文案',
-      description: '根据当前房源生成发布描述或委托沟通话术，创建和提交仍通过业务表单完成。',
-      actionLabel: '生成文案'
-    },
-    agent: {
-      title: 'AI 跟进建议',
-      description: '根据当前委托、预约或意向生成下一步跟进话术，不自动变更业务状态。',
-      actionLabel: '生成建议'
-    },
-    contract: {
-      title: 'AI 合同风险提示',
-      description: '提取合同风险点和确认意见草稿，签署、拒绝、生效仍走合同接口。',
-      actionLabel: '梳理风险'
-    }
-  }
-  return cards[workMode.value] || null
-})
-const aiAssistantProfile = computed(() => {
-  const profiles = {
-    tenant: {
-      badge: '租户 AI 助手',
-      eyebrow: '找房协作',
-      title: '租户智能找房助手',
-      summary: '围绕预算、通勤、户型和合同风险提供建议，帮你更快做出看房和意向决策。',
-      placeholder: '例如：预算 4500，想找通勤方便的两居，顺便看看当前房源值不值得约看',
-      presets: ['按预算推荐房源', '分析当前房源是否值得预约', '梳理合同风险'],
-      capabilities: ['预算匹配', '看房建议', '合同风险', '沟通问题清单']
-    },
-    owner: {
-      badge: '户主 AI 助手',
-      eyebrow: '发布协作',
-      title: '户主房源经营助手',
-      summary: '围绕房源发布、委托中介、审核补充和合同协作，帮你把业务动作做得更完整。',
-      placeholder: '例如：帮我润色当前房源文案，或者告诉我这套房源还缺哪些审核信息',
-      presets: ['润色当前房源文案', '检查当前房源审核缺口', '生成委托沟通话术'],
-      capabilities: ['房源文案', '审核补充', '委托沟通', '合同确认']
-    },
-    agent: {
-      badge: '中介 AI 助手',
-      eyebrow: '成交推进',
-      title: '中介业务跟进助手',
-      summary: '围绕可承接房源、客户预约、意向推进和签约沟通，给你更贴近业务的下一步建议。',
-      placeholder: '例如：帮我给当前客户生成跟进话术，或者判断这条意向下一步该怎么推进',
-      presets: ['生成当前业务跟进话术', '总结当前客户下一步动作', '梳理合同签约风险'],
-      capabilities: ['跟进话术', '预约推进', '意向转化', '签约提醒']
-    },
-    contract: {
-      badge: '合同 AI 助手',
-      eyebrow: '签约协作',
-      title: '合同确认与风险助手',
-      summary: '聚焦租期、押金、付款周期、交付清单和违约责任，帮你在确认前看清主要风险。',
-      placeholder: '例如：帮我看这份合同还缺什么，或者当前合同应该提醒双方注意哪些点',
-      presets: ['梳理当前合同风险', '生成合同确认意见', '总结当前合同下一步动作'],
-      capabilities: ['风险提炼', '确认意见', '交付检查', '违约提醒']
-    },
-    admin: {
-      badge: '审核 AI 助手',
-      eyebrow: '合规辅助',
-      title: '审核意见辅助助手',
-      summary: '只为审核员服务，聚焦房源字段完整性、风险词、审核意见草稿和索引任务提醒。',
-      placeholder: '例如：请结合当前房源生成审核意见，并指出必须补充的字段',
-      presets: ['生成当前房源审核意见', '检查当前房源硬性问题', '说明索引状态与处理建议'],
-      capabilities: ['字段审查', '风险提示', '审核意见', '索引提醒']
-    }
-  }
-  return profiles[workMode.value] || profiles.tenant
-})
+const businessAiCard = computed(() => businessAiCards[workMode.value] || null)
+const aiAssistantProfile = computed(() => aiAssistantProfiles[workMode.value] || aiAssistantProfiles.tenant)
 const agentPresets = computed(() => aiAssistantProfile.value.presets)
 const aiCapabilityChips = computed(() => {
   const chips = []
@@ -1220,17 +946,9 @@ const aiCapabilityChips = computed(() => {
   return chips
 })
 const knowledgeSourceText = computed(() => {
-  const labels = {
-    house: '房源',
-    contract: '合同',
-    policy: '政策',
-    faq: 'FAQ',
-    chat: '聊天记录',
-    enterprise: '企业制度'
-  }
   const sources = aiCapabilities.knowledgeSources || []
   if (!sources.length) return '合同、政策、FAQ、聊天记录、企业制度'
-  return sources.map(item => labels[item] || item).join('、')
+  return sources.map(item => knowledgeSourceLabels[item] || item).join('、')
 })
 const previewFields = computed(() => detailFields.value.slice(0, 6))
 const detailImageUrls = computed(() => {
@@ -1471,7 +1189,6 @@ onMounted(() => {
     pageMode.value = 'business'
   }
   refreshMode()
-  resetFloatingAiPosition()
   loadPortalSummary()
   loadAiCapabilities()
   if (canManageAiIndex.value) {
@@ -1481,10 +1198,6 @@ onMounted(() => {
   if (route.query?.ai === 'console' && canOpenAiConsole.value) {
     nextTick(openAiConsole)
   }
-})
-
-onBeforeUnmount(() => {
-  stopFloatingAiDrag()
 })
 
 function defaultWorkMode() {
@@ -1935,46 +1648,6 @@ function searchableValues(item) {
     item._recordType,
     recordStatusLabel(item)
   ]
-}
-
-function formatValue(value) {
-  return value === undefined || value === null || value === '' ? '-' : value
-}
-
-function formatMoney(value) {
-  return value === undefined || value === null || value === '' ? '-' : `${value} 元/月`
-}
-
-function formatPercent(value) {
-  if (value === undefined || value === null || value === '') return '-'
-  const number = Number(value)
-  if (Number.isNaN(number)) return value
-  return `${(number * 100).toFixed(2)}%`
-}
-
-function intentionLevelLabel(value) {
-  const map = { 1: '低', 2: '中', 3: '高' }
-  return map[String(value)] || value || '-'
-}
-
-function taskStatusLabel(status) {
-  const map = {
-    0: '待处理',
-    1: '处理中',
-    2: '已完成',
-    3: '失败',
-    pending: '待处理',
-    running: '处理中',
-    success: '已完成',
-    failed: '失败'
-  }
-  return map[status] || status || '未设置'
-}
-
-function aiIndexStatusLabel(status, indexed = false) {
-  if (indexed || ['1', 1].includes(status)) return '已索引'
-  if (['2', 2].includes(status)) return '索引失败'
-  return '未索引'
 }
 
 function chatTargetFor(item) {
@@ -2668,41 +2341,6 @@ async function sendAgentMessage() {
 
 function openFloatingAi() {
   floatingAiOpen.value = true
-  nextTick(scrollFloatingAiToBottom)
-}
-
-function resetFloatingAiPosition() {
-  if (typeof window === 'undefined') return
-  const width = Math.min(420, window.innerWidth - 32)
-  const height = Math.min(620, window.innerHeight - 120)
-  floatingAiPosition.x = Math.max(16, window.innerWidth - width - 92)
-  floatingAiPosition.y = Math.max(84, window.innerHeight - height - 28)
-}
-
-function startFloatingAiDrag(event) {
-  if (event.button !== undefined && event.button !== 0) return
-  floatingAiDrag.active = true
-  floatingAiDrag.offsetX = event.clientX - floatingAiPosition.x
-  floatingAiDrag.offsetY = event.clientY - floatingAiPosition.y
-  window.addEventListener('pointermove', moveFloatingAi)
-  window.addEventListener('pointerup', stopFloatingAiDrag)
-}
-
-function moveFloatingAi(event) {
-  if (!floatingAiDrag.active || typeof window === 'undefined') return
-  const modalWidth = Math.min(420, window.innerWidth - 32)
-  const modalHeight = Math.min(620, window.innerHeight - 120)
-  const nextX = event.clientX - floatingAiDrag.offsetX
-  const nextY = event.clientY - floatingAiDrag.offsetY
-  floatingAiPosition.x = clamp(nextX, 12, window.innerWidth - modalWidth - 12)
-  floatingAiPosition.y = clamp(nextY, 72, window.innerHeight - modalHeight - 12)
-}
-
-function stopFloatingAiDrag() {
-  floatingAiDrag.active = false
-  if (typeof window === 'undefined') return
-  window.removeEventListener('pointermove', moveFloatingAi)
-  window.removeEventListener('pointerup', stopFloatingAiDrag)
 }
 
 async function sendFloatingAiMessage() {
@@ -2711,7 +2349,6 @@ async function sendFloatingAiMessage() {
   floatingAiMessages.value.push({ role: 'user', content })
   floatingAiInput.value = ''
   floatingAiLoading.value = true
-  await nextTick(scrollFloatingAiToBottom)
   try {
     const res = await sendPortalAiChat(buildAiRequest(content))
     floatingAiMessages.value.push(normalizeAiMessage(res))
@@ -2719,7 +2356,6 @@ async function sendFloatingAiMessage() {
     floatingAiMessages.value.push({ role: 'assistant', content: '智能体服务暂时没有返回结果，请稍后重试。当前业务页和消息沟通不受影响。' })
   } finally {
     floatingAiLoading.value = false
-    await nextTick(scrollFloatingAiToBottom)
   }
 }
 
@@ -2736,12 +2372,6 @@ async function runBusinessAiAction() {
   floatingAiInput.value = prompts[workMode.value] || '请结合当前业务给出下一步建议。'
   openFloatingAi()
   await sendFloatingAiMessage()
-}
-
-function scrollFloatingAiToBottom() {
-  if (floatingAiListRef.value) {
-    floatingAiListRef.value.scrollTop = floatingAiListRef.value.scrollHeight
-  }
 }
 
 function buildDealPayload() {
@@ -2824,29 +2454,6 @@ function buildAiRecordContext(item) {
   }
 }
 
-function normalizeAiResponse(response) {
-  const data = normalizeAiResponsePayload(response)
-  if (typeof data === 'string') {
-    return { answer: data, toolCalls: [], suggestions: null }
-  }
-  return {
-    answer: data?.answer || data?.msg || '智能体接口已收到请求。',
-    intent: data?.intent || '',
-    intentLabel: data?.intentLabel || '',
-    toolCalls: data?.toolCalls || [],
-    suggestions: data?.suggestions || null,
-    nextActions: data?.nextActions || []
-  }
-}
-
-function normalizeAiResponsePayload(response) {
-  const data = response?.data && typeof response.data === 'object' ? response.data : response
-  if (data?.data && typeof data.data === 'object') {
-    return data.data
-  }
-  return data || {}
-}
-
 function normalizeAiMessage(response) {
   const aiResult = normalizeAiResponse(response)
   return {
@@ -2858,10 +2465,6 @@ function normalizeAiMessage(response) {
     suggestions: aiResult.suggestions,
     nextActions: aiResult.nextActions || []
   }
-}
-
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max)
 }
 </script>
 
@@ -3384,8 +2987,7 @@ function clamp(value, min, max) {
   border-radius: 8px;
 }
 
-.business-ai-card > div:first-child span,
-.ai-console-head span {
+.business-ai-card > div:first-child span {
   display: block;
   margin-bottom: 8px;
   color: #0f766e;
@@ -3393,14 +2995,12 @@ function clamp(value, min, max) {
   font-weight: 700;
 }
 
-.business-ai-card h3,
-.ai-console-head h2 {
+.business-ai-card h3 {
   margin: 0;
   color: var(--portal-ink);
 }
 
-.business-ai-card p,
-.ai-console-head p {
+.business-ai-card p {
   margin: 10px 0 0;
   color: var(--portal-muted);
   line-height: 1.65;
@@ -3428,77 +3028,11 @@ function clamp(value, min, max) {
   border-radius: 8px;
 }
 
-.ai-console-shell {
-  padding: 24px;
-  background: var(--portal-soft);
-  min-height: 100%;
-}
-
-.ai-console-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 20px 22px;
-  background: #fff;
-  border: 1px solid var(--portal-line);
-  border-radius: 8px;
-}
-
-.ai-console-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  background: #f8fafc;
-  border: 1px solid var(--portal-line);
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-.ai-console-status i {
-  width: 10px;
-  height: 10px;
-  background: #f59e0b;
-  border-radius: 50%;
-}
-
-.ai-console-status i.online {
-  background: #16a34a;
-}
-
-.console-summary,
-.console-actions {
-  margin-top: 16px;
-}
-
-.console-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
 .panel-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 14px;
-}
-
-.summary-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.summary-strip span {
-  padding: 6px 10px;
-  color: #4b5563;
-  background: #fff;
-  border: 1px solid var(--portal-line);
-  border-radius: 999px;
-  font-size: 12px;
 }
 
 .compliance-card {
@@ -3562,35 +3096,10 @@ function clamp(value, min, max) {
   color: var(--portal-muted);
 }
 
-.mini-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.mini-card,
 .table-shell {
   background: #fff;
   border: 1px solid var(--portal-line);
   border-radius: 8px;
-}
-
-.mini-card {
-  padding: 14px;
-}
-
-.mini-card strong {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--portal-ink);
-}
-
-.mini-card p {
-  margin: 0;
-  color: var(--portal-muted);
-  line-height: 1.6;
-  font-size: 13px;
 }
 
 .table-shell {
@@ -3829,178 +3338,6 @@ function clamp(value, min, max) {
   border-radius: 22px;
 }
 
-.ai-quick-rail {
-  position: fixed;
-  right: 20px;
-  bottom: 76px;
-  z-index: 2500;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.rail-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 52px;
-  color: var(--portal-primary);
-  cursor: pointer;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid var(--portal-line);
-  border-radius: 8px;
-  box-shadow: 0 12px 28px rgba(36, 42, 66, 0.12);
-  backdrop-filter: blur(8px);
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
-}
-
-.rail-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 16px 34px rgba(36, 42, 66, 0.16);
-}
-
-.rail-button .el-icon {
-  font-size: 22px;
-}
-
-.rail-button.ai-entry {
-  color: #fff;
-  background: var(--portal-primary);
-  border: 0;
-  box-shadow: 0 18px 38px rgba(37, 99, 235, 0.28);
-}
-
-.ai-quick-rail.is-open .ai-entry {
-  transform: scale(1.04);
-}
-
-.ai-float-modal {
-  position: fixed;
-  z-index: 3000;
-  display: flex;
-  flex-direction: column;
-  width: min(420px, calc(100vw - 32px));
-  height: min(620px, calc(100vh - 120px));
-  overflow: hidden;
-  background: #fff;
-  border: 1px solid var(--portal-line);
-  border-radius: 8px;
-  box-shadow: 0 28px 70px rgba(26, 31, 54, 0.28);
-}
-
-.ai-float-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 16px 14px;
-  color: #fff;
-  cursor: move;
-  user-select: none;
-  background: #1e3a5f;
-}
-
-.ai-float-head strong,
-.ai-float-head span {
-  display: block;
-}
-
-.ai-float-head strong {
-  font-size: 16px;
-}
-
-.ai-float-head span {
-  margin-top: 4px;
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 12px;
-}
-
-.ai-float-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.ai-float-actions button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  color: #fff;
-  cursor: pointer;
-  background: rgba(255, 255, 255, 0.16);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 9px;
-}
-
-.ai-float-body {
-  flex: 1;
-  min-height: 0;
-  padding: 18px;
-  overflow-y: auto;
-  background: var(--portal-soft);
-}
-
-.ai-float-message {
-  max-width: 84%;
-  padding: 10px 12px;
-  margin-bottom: 12px;
-  border-radius: 8px;
-  line-height: 1.65;
-  white-space: pre-wrap;
-}
-
-.ai-float-message.assistant {
-  color: var(--portal-ink);
-  background: #fff;
-  border: 1px solid var(--portal-line);
-}
-
-.ai-float-message.user {
-  margin-left: auto;
-  color: #fff;
-  background: var(--portal-primary);
-}
-
-.ai-float-presets {
-  display: flex;
-  gap: 8px;
-  padding: 10px 14px 0;
-  overflow-x: auto;
-  background: #fff;
-}
-
-.ai-float-presets button {
-  flex: 0 0 auto;
-  height: 30px;
-  padding: 0 10px;
-  color: #1e3a5f;
-  cursor: pointer;
-  background: #eef4ff;
-  border: 1px solid #c7d7fe;
-  border-radius: 15px;
-  font-size: 12px;
-}
-
-.ai-float-composer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px;
-  gap: 10px;
-  align-items: center;
-  padding: 12px 14px 14px;
-  background: #fff;
-}
-
-.ai-float-composer :deep(.el-textarea__inner) {
-  min-height: 40px !important;
-  padding: 10px 12px;
-  background: var(--portal-soft);
-  border: 1px solid var(--portal-line);
-  border-radius: 8px;
-  box-shadow: none;
-}
-
 .message-content {
   white-space: pre-wrap;
 }
@@ -4024,45 +3361,6 @@ function clamp(value, min, max) {
 
 .ai-trace.compact span {
   font-size: 11px;
-}
-
-.knowledge-card {
-  padding: 18px;
-  background: #fff;
-  border: 1px solid var(--portal-line);
-  border-radius: 8px;
-}
-
-.knowledge-card__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 14px;
-}
-
-.knowledge-card__head strong {
-  color: var(--portal-ink);
-  font-size: 16px;
-}
-
-.knowledge-card__head p {
-  max-width: 640px;
-  margin: 6px 0 0;
-  color: var(--portal-muted);
-  line-height: 1.6;
-}
-
-.knowledge-form__row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.knowledge-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
 }
 
 @media (max-width: 1100px) {
@@ -4089,8 +3387,6 @@ function clamp(value, min, max) {
   .agent-capabilities,
   .inline-form,
   .inline-form.compact,
-  .mini-grid,
-  .knowledge-form__row,
   .deal-form,
   .contract-extra-actions {
     grid-template-columns: 1fr;
@@ -4106,8 +3402,7 @@ function clamp(value, min, max) {
     min-height: auto;
   }
 
-  .agent-message,
-  .ai-float-message {
+  .agent-message {
     max-width: 92%;
   }
 
@@ -4146,11 +3441,6 @@ function clamp(value, min, max) {
   .user-entry span,
   .user-entry .el-icon {
     display: none;
-  }
-
-  .ai-quick-rail {
-    right: 14px;
-    bottom: 64px;
   }
 }
 </style>
