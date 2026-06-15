@@ -8,31 +8,39 @@ FastAPI + LangChain AI service for the rental system.
 前端门户
   -> RuoYi 后端 /rental/ai/chat
   -> ai-service /api/v1/agent/chat
-  -> intent 识别
-  -> Skill 选择
-  -> Tool 编排执行
-  -> LangChain ChatOpenAI 可选润色
+  -> 通用角色：intent 识别 / Skill 选择 / Tool 编排 / LangChain 可选润色
+  -> 租户角色：LangGraph 多智能体主管协作图
   -> 返回 answer / skill / toolCalls / suggestions / nextActions
 ```
 
 未配置 `AI_LLM_API_KEY` 时，服务仍使用本地规则和工具链，业务功能可用。
 
-## 租户多智能体协作
+## 租户 LangGraph 多智能体
 
-租户智能体采用主管和并行混合模式，接口仍复用 `/api/v1/agent/chat` 与 `/api/v1/agent/recommend`：
+租户智能体主流程位于 `app/agent/graph.py`，接口仍复用 `/api/v1/agent/chat` 与 `/api/v1/agent/recommend`：
 
 ```text
-router
-  -> 基于用户问题、角色上下文和 RAG 命中内容判断意图、槽位和路由
-coordinator
-  -> 主管智能体生成工具计划和专家协作计划
-collaboration
-  -> 并行调用房源检索、地图生活、风险分析、知识政策、业务上下文专家
-synthesis
-  -> 汇总专家结果、工具结果和上下文，统一生成最终回复
+rag_prefetch -> router -> coordinator
+  -> llm_unconfigured | smalltalk | slot_filling | collaboration | retrieval_executor
+  -> analyst -> synthesis -> persist_memory
 ```
 
-响应会额外返回 `collaboration` 字段，包含 `mode`、`router`、`coordinator`、`experts` 和 `synthesis`，前端可用于展示主管智能体协作轨迹。
+该项目采用混合模式：
+
+- 主管模式：`coordinator` 决定本轮要哪些专家参与、哪些动作需要用户确认。
+- 并行模式：`collaboration` 内部并发调用 `house_search_specialist`、`map_life_specialist`、`risk_analysis_specialist`，并手动合并结果，避免 LangGraph 并行状态冲突。
+- 汇总模式：`synthesis` 统一生成最终回复，避免多个专家分别面向用户输出造成口径不一致。
+
+关键节点：
+
+- `rag_prefetch`：必经 RAG，优先查 Milvus，未配置时回退到现有 pgvector 知识库，并缝合 prompt context。
+- `router`：生成结构化 `intent`、`route`、`slots`、`missing_slots`。
+- `coordinator`：主管智能体，生成工具计划、确认策略和专家协作计划。
+- `collaboration`：并行协作执行器，按主管计划并发调用多个专家。
+- `retrieval_executor`、`analyst`：兼容兜底节点；主管未生成并行计划时执行检索分析。
+- `persist_memory`：写入短期记忆，并尝试通过 Java 工具层保存长期记忆。
+
+响应会额外返回 `collaboration`、`checkpoints` 和 `rag` 字段，前端可展示主管智能体协作轨迹。
 
 ## Skill
 
@@ -82,9 +90,19 @@ def review_house_compliance(state, **kwargs):
 - `draft_followup_message`：给中介、户主、租户生成可复制的话术。
 - `explain_contract_risk`：提取合同风险点。
 
+租户 LangGraph 专用工具按业务域拆分在 `app/agent/tools`：
+
+- `rental_business.py`：房源检索、房源详情、合同查询、长期记忆和白名单动作，优先通过 Java 工具契约执行。
+- `vector_search.py`：Milvus 向量检索，未配置时回退 pgvector。
+- `amap.py`：高德周边和路线材料，未配置时使用兜底看房清单。
+- `safety.py`：人为确认策略。
+- `registry.py`：装配 LangChain tools。
+
+Java 工具边界位于 `RuoYi-Vue/ruoyi-admin/src/main/java/com/ruoyi/web/controller/rental/RentalAiToolController.java`，路径为 `/rental/ai/tools`。真实查表、鉴权、脱敏、落库和审计均留在 Java 业务层完成。
+
 ## RAG 统一知识库
 
-项目使用 `PostgreSQL + pgvector` 做向量库。知识库不只存房源，也存：
+租户智能体优先使用 Milvus RAG，未配置 `MILVUS_URI` 或 `MILVUS_HOST` 时自动回退到现有 `PostgreSQL + pgvector`。知识库不只存房源，也存：
 
 - `house`：房源文档
 - `contract`：合同模板、条款、风险清单
@@ -129,7 +147,7 @@ GET /api/v1/mcp/manifest
 - `tools`：当前可执行业务 Tool。
 - `notes`：当前边界和后续拆成独立 MCP Server 的说明。
 
-现阶段 Tool 仍由 `ai-service` 本地执行。后续如果要接 IDE、智能体平台或外部工作流，可以把 `TOOL_REGISTRY` 和 `mcp_manifest` 抽成标准 MCP Server。
+`app/agent/mcp/client.py` 使用 `langchain-mcp-adapters` 的 `MultiServerMCPClient`。配置项为 `MCP_SERVERS_JSON`，未配置时返回空工具集，不影响主流程。
 
 ## LangChain
 

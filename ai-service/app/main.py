@@ -31,7 +31,7 @@ from app.config import EMBEDDING_MODEL, INTENT_LABELS, KNOWLEDGE_SOURCE_TYPES, R
 from app.langchain_runtime import build_langchain_tools, langchain_status, refine_with_langchain, tool_specs
 from app.schemas import ChatRequest, HouseIndexRequest, KnowledgeIndexRequest, RecommendRequest
 from app.skill_registry import list_skills, select_skill, skill_to_dict
-from app.tenant_agent import run_tenant_multi_agent, should_use_tenant_multi_agent
+from app.agent.graph import run_tenant_graph
 from app.tooling import TOOL_REGISTRY, call_tool, tool, tool_description, tool_label
 from app.vector_store import (
     count_indexed_houses,
@@ -49,6 +49,39 @@ from app.vector_store import (
 app = FastAPI(title="Rental AI Service", version="0.2.0")
 
 
+TENANT_LANGGRAPH_AGENTS = [
+    "rag_prefetch",
+    "router",
+    "coordinator",
+    "llm_unconfigured",
+    "smalltalk",
+    "slot_filling",
+    "collaboration",
+    "retrieval_executor",
+    "analyst",
+    "synthesis",
+    "persist_memory",
+]
+
+
+def tenant_langgraph_mode() -> dict[str, Any]:
+    return {
+        "role": "tenant",
+        "mode": "langgraph-supervisor-parallel-hybrid",
+        "agents": TENANT_LANGGRAPH_AGENTS,
+        "specialists": ["house_search_specialist", "map_life_specialist", "risk_analysis_specialist"],
+    }
+
+
+TENANT_GRAPH_INTENTS = {
+    "house_recommend",
+    "contract_risk",
+    "knowledge_answer",
+    "record_summary",
+    "context_answer",
+}
+
+
 @app.get("/health")
 def health():
     ensure_vector_store()
@@ -64,13 +97,7 @@ def health():
         "langchainToolCount": len(langchain_tools),
         "skills": [skill_to_dict(skill) for skill in list_skills()],
         "tools": tool_specs(TOOL_REGISTRY, tool_label, tool_description),
-        "multiAgentModes": [
-            {
-                "role": "tenant",
-                "mode": "tenant-supervisor-parallel-hybrid",
-                "agents": ["router", "coordinator", "house_search", "map_life", "risk_analysis", "synthesis"],
-            }
-        ],
+        "multiAgentModes": [tenant_langgraph_mode()],
     }
 
 
@@ -92,15 +119,9 @@ def agent_capabilities():
         "langchainToolCount": len(langchain_tools),
         "skills": [skill_to_dict(skill) for skill in list_skills()],
         "tools": tool_specs(TOOL_REGISTRY, tool_label, tool_description),
-        "multiAgentModes": [
-            {
-                "role": "tenant",
-                "mode": "tenant-supervisor-parallel-hybrid",
-                "agents": ["router", "coordinator", "house_search", "map_life", "risk_analysis", "synthesis"],
-            }
-        ],
+        "multiAgentModes": [tenant_langgraph_mode()],
         "mcpReady": True,
-        "mcpPlan": "已提供 MCP 工具/资源清单，后续可独立成 MCP Server 对外注册。",
+        "mcpPlan": "已提供 MCP 工具/资源清单；配置 MCP_SERVERS_JSON 后可加载外部 MCP 工具，不配置不影响主流程。",
     }
 
 
@@ -109,24 +130,8 @@ def chat(request: ChatRequest):
     state = build_agent_state(request)
     intent = detect_intent(request.message, state)
     skill = select_skill(intent, state)
-    if should_use_tenant_multi_agent(state, intent):
-        result = run_tenant_multi_agent(
-            state,
-            intent,
-            skill,
-            call_tool,
-            render_agent_answer,
-            refine_with_llm_if_configured,
-        )
-        memory_updated = update_memory(state["sessionKey"], request.message, result["answer"])
-        tool_calls = result["toolCalls"]
-        return {
-            **result,
-            "houseIds": collect_house_ids(state, tool_calls),
-            "memoryUpdated": memory_updated,
-            "suggestions": extract_suggestions(tool_calls),
-            "nextActions": build_next_actions(result["intent"], state, tool_calls),
-        }
+    if should_use_tenant_graph(state, intent):
+        return run_tenant_graph(build_tenant_graph_request(request, state))
 
     tool_calls = run_agent_tools(intent, state)
     answer = render_agent_answer(intent, state, tool_calls)
@@ -165,25 +170,23 @@ def recommend(request: RecommendRequest):
         "recommend": {"city": request.city, "maxRent": request.maxRent},
         "memory": [],
     }
-    skill = select_skill("house_recommend", state)
-    if should_use_tenant_multi_agent(state, "house_recommend"):
-        result = run_tenant_multi_agent(
-            state,
-            "house_recommend",
-            skill,
-            call_tool,
-            render_agent_answer,
-            refine_with_llm_if_configured,
-        )
-        tool_calls = result["toolCalls"]
-        return {
-            **result,
-            "houseIds": collect_house_ids(state, tool_calls),
-            "memoryUpdated": False,
-            "suggestions": extract_suggestions(tool_calls),
-            "nextActions": build_next_actions(result["intent"], state, tool_calls),
-        }
+    if should_use_tenant_graph(state, "house_recommend"):
+        return run_tenant_graph({
+            "query": request.query,
+            "message": request.query,
+            "city": request.city,
+            "maxRent": request.maxRent,
+            "userId": request.userId,
+            "username": request.username,
+            "role": state.get("role"),
+            "roles": request.roles or [],
+            "isAdmin": bool(request.isAdmin),
+            "context": request.context or {},
+            "sessionId": request.userId or "anonymous",
+            "recommend": {"city": request.city, "maxRent": request.maxRent},
+        })
 
+    skill = select_skill("house_recommend", state)
     tool_calls = [
         call_tool(
             "search_public_houses",
@@ -395,6 +398,26 @@ def infer_role(roles: list[str]) -> str:
     if "admin" in roles:
         return "admin"
     return "tenant"
+
+
+def should_use_tenant_graph(state: dict[str, Any], intent: str) -> bool:
+    return state.get("role") in {"tenant", "user"} and intent in TENANT_GRAPH_INTENTS
+
+
+def build_tenant_graph_request(request: ChatRequest, state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "message": request.message,
+        "userId": request.userId,
+        "username": request.username,
+        "role": state.get("role"),
+        "roles": request.roles or [],
+        "isAdmin": bool(request.isAdmin),
+        "sessionId": request.sessionId or request.userId or "anonymous",
+        "history": [item.model_dump() for item in request.history or []],
+        "context": request.context or {},
+        "transactionType": request.transactionType,
+        "transactionTitle": request.transactionTitle,
+    }
 
 
 def detect_intent(message: str, state: dict[str, Any]) -> str:

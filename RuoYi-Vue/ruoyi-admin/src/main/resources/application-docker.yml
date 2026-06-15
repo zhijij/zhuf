@@ -13,6 +13,7 @@ spring:
 ai:
   service:
     base-url: http://ai-service:8000
+    internal-token: ${AI_INTERNAL_TOOL_TOKEN:smart-rental-ai-internal}
 
 storage:
   provider: ${STORAGE_PROVIDER:local}

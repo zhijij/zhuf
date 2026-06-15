@@ -6,3 +6,7 @@ psycopg[binary]
 langchain
 langchain-core
 langchain-openai
+langgraph
+pymilvus
+redis
+langchain-mcp-adapters
