@@ -1,9 +1,11 @@
+import json
 import os
 from datetime import datetime
 from typing import Any
 
 import httpx
 from fastapi import FastAPI
+from pydantic import BaseModel, Field
 from app import runtime_store as store
 from app.business_rules import (
     as_int,
@@ -28,10 +30,13 @@ from app.business_rules import (
     stable_source_id,
 )
 from app.config import EMBEDDING_MODEL, INTENT_LABELS, KNOWLEDGE_SOURCE_TYPES, ROLE_LABELS
-from app.langchain_runtime import build_langchain_tools, langchain_status, refine_with_langchain, tool_specs
+from app.langchain_runtime import build_langchain_tools, invoke_structured_json, langchain_status, refine_with_langchain, tool_specs
 from app.schemas import ChatRequest, HouseIndexRequest, KnowledgeIndexRequest, RecommendRequest
 from app.skill_registry import list_skills, select_skill, skill_to_dict
+from app.agent.memory.checkpoint import checkpointer_status
+from app.agent.chat_business import chat_business_agent_mode, run_chat_business_agent
 from app.agent.graph import run_tenant_graph
+from app.agent.tools.rental_business import get_house_map_context
 from app.tooling import TOOL_REGISTRY, call_tool, tool, tool_description, tool_label
 from app.vector_store import (
     count_indexed_houses,
@@ -47,6 +52,14 @@ from app.vector_store import (
 )
 
 app = FastAPI(title="Rental AI Service", version="0.2.0")
+
+
+class AgentToolPlan(BaseModel):
+    intent: str = Field(default="context_answer")
+    tools: list[str] = Field(default_factory=list)
+    ask_user: list[str] = Field(default_factory=list)
+    source_types: list[str] = Field(default_factory=list)
+    reason: str = Field(default="")
 
 
 TENANT_LANGGRAPH_AGENTS = [
@@ -75,6 +88,7 @@ def tenant_langgraph_mode() -> dict[str, Any]:
 
 TENANT_GRAPH_INTENTS = {
     "house_recommend",
+    "correction",
     "contract_risk",
     "knowledge_answer",
     "record_summary",
@@ -94,10 +108,11 @@ def health():
         "vectorDbReady": store.DB_READY,
         "embeddingMode": "remote" if embedding_api_enabled() else "local-hash",
         "langchain": langchain_status(),
+        "checkpointer": checkpointer_status(),
         "langchainToolCount": len(langchain_tools),
         "skills": [skill_to_dict(skill) for skill in list_skills()],
         "tools": tool_specs(TOOL_REGISTRY, tool_label, tool_description),
-        "multiAgentModes": [tenant_langgraph_mode()],
+        "multiAgentModes": [tenant_langgraph_mode(), chat_business_agent_mode()],
     }
 
 
@@ -116,10 +131,11 @@ def agent_capabilities():
         "vectorStore": "PostgreSQL + pgvector",
         "knowledgeSources": KNOWLEDGE_SOURCE_TYPES,
         "langchain": langchain_status(),
+        "checkpointer": checkpointer_status(),
         "langchainToolCount": len(langchain_tools),
         "skills": [skill_to_dict(skill) for skill in list_skills()],
         "tools": tool_specs(TOOL_REGISTRY, tool_label, tool_description),
-        "multiAgentModes": [tenant_langgraph_mode()],
+        "multiAgentModes": [tenant_langgraph_mode(), chat_business_agent_mode()],
         "mcpReady": True,
         "mcpPlan": "已提供 MCP 工具/资源清单；配置 MCP_SERVERS_JSON 后可加载外部 MCP 工具，不配置不影响主流程。",
     }
@@ -129,6 +145,12 @@ def agent_capabilities():
 def chat(request: ChatRequest):
     state = build_agent_state(request)
     intent = detect_intent(request.message, state)
+    if intent == "chat_assist":
+        response = run_chat_business_agent(state)
+        answer = response.get("answer") or ""
+        response["memoryUpdated"] = update_memory(state["sessionKey"], request.message, answer)
+        return response
+
     skill = select_skill(intent, state)
     if should_use_tenant_graph(state, intent):
         return run_tenant_graph(build_tenant_graph_request(request, state))
@@ -142,6 +164,7 @@ def chat(request: ChatRequest):
         "answer": answer,
         "intent": intent,
         "intentLabel": INTENT_LABELS.get(intent, intent),
+        "agentPlan": state.get("agentPlan"),
         "skill": skill_to_dict(skill),
         "houseIds": collect_house_ids(state, tool_calls),
         "toolCalls": tool_calls,
@@ -421,8 +444,18 @@ def build_tenant_graph_request(request: ChatRequest, state: dict[str, Any]) -> d
 
 
 def detect_intent(message: str, state: dict[str, Any]) -> str:
+    context = state.get("context") or {}
+    if context.get("pageMode") == "chat" or context.get("chat"):
+        return "chat_assist"
+
+    llm_intent = detect_intent_with_llm(message, state)
+    if llm_intent:
+        return llm_intent
+
     text = (message or "").lower()
     role = state.get("role")
+    if has_any(text, ["不对", "不对吧", "不太对", "不准确", "不是这个", "你理解错了", "重新来", "重说", "纠正一下"]):
+        return "correction"
     if state.get("transactionType"):
         return "transaction_draft"
     if has_any(text, ["索引", "向量", "知识库", "入库", "召回"]):
@@ -446,12 +479,53 @@ def detect_intent(message: str, state: dict[str, Any]) -> str:
     return "context_answer"
 
 
+def detect_intent_with_llm(message: str, state: dict[str, Any]) -> str | None:
+    base_url = os.getenv("AI_LLM_BASE_URL", "").rstrip("/")
+    api_key = os.getenv("AI_LLM_API_KEY", "")
+    model = os.getenv("AI_LLM_MODEL", "")
+    if not base_url or not api_key or not model:
+        return None
+
+    messages = [
+        ("system",
+         "你是企业租赁智能体的意图路由器。"
+         "请输出 JSON，字段 intent 只能是："
+         "smalltalk, correction, house_recommend, transaction_draft, record_summary, compliance_review, "
+         "contract_risk, listing_copy, followup_message, chat_assist, index_advice, knowledge_answer, context_answer。"),
+        ("user",
+         json.dumps({
+             "message": message,
+             "role": state.get("role"),
+             "selected": state.get("selected") or {},
+             "chat": (state.get("context") or {}).get("chat") or {},
+             "transactionType": state.get("transactionType"),
+         }, ensure_ascii=False))
+    ]
+    data = invoke_structured_json(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        messages=messages,
+        timeout=8,
+    )
+    intent = str((data or {}).get("intent") or "").strip()
+    if intent in {
+        "smalltalk", "correction", "house_recommend", "transaction_draft", "record_summary",
+        "compliance_review", "contract_risk", "listing_copy", "followup_message",
+        "chat_assist", "index_advice", "knowledge_answer", "context_answer",
+    }:
+        return intent
+    return None
+
+
 def has_any(text: str, keywords: list[str]) -> bool:
     return any(keyword in text for keyword in keywords)
 
 
-def run_agent_tools(intent: str, state: dict[str, Any]) -> list[dict[str, Any]]:
-    plan = {
+def default_tool_plan(intent: str) -> list[str]:
+    return {
+        "smalltalk": [],
+        "correction": [],
         "house_recommend": ["search_public_houses", "search_knowledge_base"],
         "transaction_draft": ["summarize_business_record", "draft_transaction_form"],
         "record_summary": ["summarize_business_record"],
@@ -459,11 +533,129 @@ def run_agent_tools(intent: str, state: dict[str, Any]) -> list[dict[str, Any]]:
         "contract_risk": ["search_knowledge_base", "summarize_business_record", "explain_contract_risk"],
         "listing_copy": ["search_knowledge_base", "summarize_business_record", "draft_listing_copy"],
         "followup_message": ["search_knowledge_base", "summarize_business_record", "draft_followup_message"],
+        "chat_assist": ["summarize_chat_context", "summarize_business_record", "search_knowledge_base", "draft_followup_message"],
         "index_advice": ["summarize_index_state", "search_knowledge_base"],
         "knowledge_answer": ["search_knowledge_base", "summarize_business_record"],
         "context_answer": ["search_knowledge_base", "summarize_business_record"],
     }.get(intent, ["summarize_business_record"])
-    return [call_tool(name, state) for name in plan]
+
+
+def infer_knowledge_source_types(intent: str, state: dict[str, Any]) -> list[str]:
+    selected = state.get("selected") or {}
+    if intent == "contract_risk":
+        return ["contract", "policy", "faq"]
+    if intent == "compliance_review":
+        return ["policy", "enterprise", "chat"]
+    if intent in ["followup_message", "chat_assist"]:
+        return ["enterprise", "chat", "faq"]
+    if intent == "knowledge_answer":
+        text = str(state.get("message") or "")
+        if "合同" in text:
+            return ["contract", "faq", "policy"]
+        if "政策" in text or "规则" in text or "制度" in text:
+            return ["policy", "faq", "enterprise"]
+        return ["faq", "policy", "enterprise", "chat"]
+    if intent == "context_answer" and selected.get("contractId"):
+        return ["contract", "chat", "enterprise"]
+    return []
+
+
+def plan_agent_tools_with_llm(intent: str, state: dict[str, Any]) -> dict[str, Any] | None:
+    base_url = os.getenv("AI_LLM_BASE_URL", "").rstrip("/")
+    api_key = os.getenv("AI_LLM_API_KEY", "")
+    model = os.getenv("AI_LLM_MODEL", "")
+    if not base_url or not api_key or not model:
+        return None
+
+    allowed_tools = sorted(TOOL_REGISTRY.keys())
+    default_plan = default_tool_plan(intent)
+    messages = [
+        ("system",
+         "你是企业租赁智能体的工具规划器。"
+         "请基于当前意图、角色和上下文，输出 JSON。"
+         "字段包括 intent、tools、ask_user、source_types、reason。"
+         f"tools 只能从这些工具中选择：{allowed_tools}。"
+         "如果只是寒暄或纠偏，tools 应为空列表。"
+         "source_types 只允许使用 house, contract, policy, faq, chat, enterprise。"),
+        ("user",
+         json.dumps({
+             "intent": intent,
+             "message": state.get("message"),
+             "role": state.get("role"),
+             "selected": state.get("selected") or {},
+             "chat": (state.get("context") or {}).get("chat") or {},
+             "filters": state.get("filters") or {},
+             "transactionType": state.get("transactionType"),
+             "defaultPlan": default_plan,
+         }, ensure_ascii=False))
+    ]
+    data = invoke_structured_json(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        messages=messages,
+        timeout=8,
+    )
+    if not data:
+        return None
+    try:
+        planned = AgentToolPlan(
+            intent=str(data.get("intent") or intent),
+            tools=[str(item) for item in (data.get("tools") or []) if str(item) in TOOL_REGISTRY],
+            ask_user=[str(item) for item in (data.get("ask_user") or []) if item],
+            source_types=[str(item) for item in (data.get("source_types") or []) if item in KNOWLEDGE_SOURCE_TYPES],
+            reason=str(data.get("reason") or ""),
+        )
+    except Exception:
+        return None
+
+    tools = planned.tools or default_plan
+    if intent == "chat_assist" and "summarize_chat_context" not in tools:
+        tools = ["summarize_chat_context", *tools]
+    return {
+        "intent": planned.intent or intent,
+        "tools": tools,
+        "askUser": planned.ask_user,
+        "sourceTypes": planned.source_types or infer_knowledge_source_types(intent, state),
+        "reason": planned.reason,
+        "mode": "llm",
+    }
+
+
+def build_agent_tool_plan(intent: str, state: dict[str, Any]) -> dict[str, Any]:
+    if intent == "chat_assist":
+        return {
+            "intent": intent,
+            "tools": default_tool_plan(intent),
+            "askUser": [],
+            "sourceTypes": infer_knowledge_source_types(intent, state),
+            "reason": "business-chat-fixed-agent-flow",
+            "mode": "workflow",
+        }
+
+    llm_plan = plan_agent_tools_with_llm(intent, state)
+    if llm_plan:
+        return llm_plan
+    return {
+        "intent": intent,
+        "tools": default_tool_plan(intent),
+        "askUser": [],
+        "sourceTypes": infer_knowledge_source_types(intent, state),
+        "reason": "fallback-default-plan",
+        "mode": "fallback",
+    }
+
+
+def run_agent_tools(intent: str, state: dict[str, Any]) -> list[dict[str, Any]]:
+    plan = build_agent_tool_plan(intent, state)
+    state["agentPlan"] = plan
+    tool_calls = []
+    for name in plan.get("tools") or []:
+        kwargs = {}
+        if name == "search_knowledge_base":
+            kwargs["sourceTypes"] = plan.get("sourceTypes") or []
+        tool_calls.append(call_tool(name, state, **kwargs))
+    return tool_calls
 
 
 @tool("search_public_houses")
@@ -505,6 +697,22 @@ def search_public_houses(
     }
 
 
+@tool("amap_house_context")
+def amap_house_context(
+    state: dict[str, Any],
+    houseId: int | str | None = None,
+    destination: str | None = None,
+    mode: str = "transit",
+) -> dict[str, Any]:
+    selected = state.get("selected") or {}
+    return get_house_map_context(
+        state,
+        houseId or selected.get("houseId"),
+        destination=destination,
+        mode=mode,
+    )
+
+
 @tool("summarize_business_record")
 def summarize_business_record(state: dict[str, Any], **_: Any) -> dict[str, Any]:
     selected = state.get("selected") or {}
@@ -542,17 +750,33 @@ def summarize_business_record(state: dict[str, Any], **_: Any) -> dict[str, Any]
 
 
 @tool("search_knowledge_base")
-def search_knowledge_base(state: dict[str, Any], **_: Any) -> dict[str, Any]:
+def search_knowledge_base(
+    state: dict[str, Any],
+    sourceTypes: list[str] | None = None,
+    minScore: float | None = None,
+    **_: Any,
+) -> dict[str, Any]:
     ensure_vector_store()
     query = state.get("message") or ""
-    matches = search_vector_knowledge(query, state.get("role"))
+    if sourceTypes is None:
+        sourceTypes = infer_knowledge_source_types(state.get("intent") or "", state)
+    matches = search_vector_knowledge(
+        query,
+        state.get("role"),
+        source_types=sourceTypes,
+        min_score=minScore,
+    )
     if not matches:
         fallback = seed_static_knowledge(query, state)
-        matches = fallback
+        if sourceTypes:
+            matches = [item for item in fallback if item.get("sourceType") in sourceTypes]
+        else:
+            matches = fallback
     summary = "未命中统一知识库内容。" if not matches else "命中知识库：" + "、".join(item["title"] for item in matches[:4])
     return {
         "summary": summary,
         "matches": matches[:6],
+        "appliedSourceTypes": sourceTypes or [],
         "sourceTypes": sorted({item.get("sourceType") for item in matches if item.get("sourceType")}),
     }
 
@@ -768,16 +992,84 @@ def draft_listing_copy(state: dict[str, Any], **_: Any) -> dict[str, Any]:
 def draft_followup_message(state: dict[str, Any], **_: Any) -> dict[str, Any]:
     selected = state.get("selected") or {}
     role = state.get("role")
+    chat = summarize_chat_context(state)
+    missing = chat.get("missingFacts") or []
+    biz_type = selected.get("bizType") or (state.get("context") or {}).get("chat", {}).get("bizType")
+    subject = selected.get("title") or chat.get("title") or "当前业务"
+    action_hint = "、".join(missing[:2]) if missing else "下一步安排"
+
     if role == "agent":
-        text = "您好，我已整理该房源的租金、入住时间和看房安排。方便的话请确认预算上限和可看房时间，我会同步推进下一步。"
+        if biz_type == "appointment":
+            text = f"您好，关于“{subject}”的看房安排我这边继续跟进。方便确认一下可看房时间和到场人数吗？我同步核实房源状态后给您确认。"
+        elif biz_type == "intention":
+            text = f"您好，我已记录您对“{subject}”的意向。为了判断是否推进签约，想再确认{action_hint}，确认后我会同步户主并安排下一步。"
+        elif biz_type == "contract":
+            text = f"您好，合同沟通我这边会重点核对租期、租金、押金和交付清单。请您确认是否还有需要补充或调整的条款。"
+        else:
+            text = f"您好，我已整理“{subject}”的沟通信息。方便补充{action_hint}吗？确认后我会继续推进业务。"
     elif role == "owner":
-        text = "您好，我这边已确认房源信息。请中介同步客户意向、带看反馈和签约风险点，便于我判断是否继续委托。"
+        text = f"您好，我这边已关注“{subject}”的沟通进展。请同步客户意向、看房反馈和可能影响成交的风险点，便于我判断下一步。"
     else:
-        text = "您好，我对这套房源比较感兴趣，想进一步确认入住时间、付款周期、押金退还规则和家具家电情况。"
+        if biz_type == "contract":
+            text = "您好，我想再确认合同里的租期、押金退还、付款周期、维修责任和交付清单，确认清楚后再继续提交。"
+        elif biz_type == "appointment":
+            text = "您好，我想确认房源是否仍可租、看房时间是否可以协调，以及通勤、采光、噪音和家具家电情况。"
+        else:
+            text = f"您好，我对“{subject}”还想进一步确认{action_hint}，确认后再决定是否继续推进。"
     return {
         "summary": text,
         "message": text,
+        "chatSummary": chat.get("summary"),
         "bizId": selected.get("houseId") or selected.get("entrustId") or selected.get("contractId"),
+    }
+
+
+@tool("summarize_chat_context")
+def summarize_chat_context(state: dict[str, Any], **_: Any) -> dict[str, Any]:
+    context = state.get("context") or {}
+    chat = context.get("chat") or {}
+    selected = state.get("selected") or {}
+    messages = chat.get("messages") or []
+    normalized = []
+    for item in messages[-10:]:
+        if not isinstance(item, dict):
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        normalized.append({
+            "mine": bool(item.get("mine")),
+            "messageType": item.get("messageType") or "text",
+            "content": content,
+            "createTime": item.get("createTime"),
+        })
+
+    biz_type = chat.get("bizType") or selected.get("bizType") or ""
+    title = chat.get("title") or selected.get("title") or "当前业务会话"
+    last_message = chat.get("lastMessage") or (normalized[-1]["content"] if normalized else "")
+    confirmed = infer_confirmed_chat_facts(normalized)
+    missing = infer_missing_chat_facts(biz_type, normalized, confirmed)
+    summary_parts = [
+        f"会话：{title}",
+        f"业务类型：{biz_type or '未标记'}",
+        f"最近消息数：{len(normalized)}",
+    ]
+    if last_message:
+        summary_parts.append(f"最后消息：{last_message[:80]}")
+    if confirmed:
+        summary_parts.append("已提到：" + "、".join(confirmed[:5]))
+    if missing:
+        summary_parts.append("待确认：" + "、".join(missing[:5]))
+    return {
+        "summary": "；".join(summary_parts),
+        "title": title,
+        "bizType": biz_type,
+        "bizId": chat.get("bizId") or selected.get("bizId"),
+        "messageCount": len(normalized),
+        "lastMessage": last_message,
+        "confirmedFacts": confirmed,
+        "missingFacts": missing,
+        "recentMessages": normalized,
     }
 
 
@@ -826,6 +1118,14 @@ def render_agent_answer(intent: str, state: dict[str, Any], tool_calls: list[dic
             lines.append("你可以选中其中一套，我再结合当前业务判断下一步动作。")
         return "\n".join(lines)
 
+    if intent == "smalltalk":
+        if selected.get("houseId") or selected.get("entrustId") or selected.get("contractId"):
+            return f"你好。我可以直接基于当前{role_label}已选中的业务记录继续帮你看下一步，也可以先回答一个独立问题。"
+        return role_empty_answer(role, role_label)
+
+    if intent == "correction":
+        return "我刚才可能理解偏了。你直接告诉我你要纠正哪一点，我会按新的目标重新判断，不沿用刚才那条结论。"
+
     if intent == "transaction_draft":
         draft = first_output(tool_calls, "draft_transaction_form")
         fields = "、".join((draft.get("suggestions") or {}).keys()) or "备注"
@@ -871,6 +1171,29 @@ def render_agent_answer(intent: str, state: dict[str, Any], tool_calls: list[dic
         if message:
             return "\n".join([message, *references])
         return "当前还缺少足够的业务上下文。你先选中委托、预约或意向记录，我再帮你生成更贴场景的话术。"
+
+    if intent == "chat_assist":
+        chat = first_output(tool_calls, "summarize_chat_context")
+        followup = first_output(tool_calls, "draft_followup_message")
+        references = knowledge_reference_lines(first_output(tool_calls, "search_knowledge_base"))
+        mode = ((state.get("context") or {}).get("chat") or {}).get("assistMode") or "reply"
+        message = followup.get("message") or ""
+        if mode == "reply":
+            return message or "当前会话信息还不够完整，建议先确认对方的预算、时间和下一步意向。"
+        if mode == "summary":
+            lines = [chat.get("summary") or "当前会话暂无可总结内容。"]
+            missing = chat.get("missingFacts") or []
+            if missing:
+                lines.append("待确认：" + "、".join(missing))
+            lines.extend(references)
+            return "\n".join(lines)
+        actions = build_chat_next_actions(state, chat)
+        lines = ["建议下一步这样推进："]
+        lines.extend(f"{index}. {item}" for index, item in enumerate(actions, start=1))
+        if message:
+            lines.append("可发送话术：" + message)
+        lines.extend(references)
+        return "\n".join(lines)
 
     if intent == "index_advice":
         return first_output(tool_calls, "summarize_index_state").get("summary") or "当前还拿不到索引状态，你可以稍后再试一次。"
@@ -1006,6 +1329,8 @@ def extract_suggestions(tool_calls: list[dict[str, Any]]) -> dict[str, Any] | No
 
 
 def build_next_actions(intent: str, state: dict[str, Any], tool_calls: list[dict[str, Any]]) -> list[str]:
+    if intent == "chat_assist":
+        return build_chat_next_actions(state, first_output(tool_calls, "summarize_chat_context"))
     if intent == "house_recommend":
         return ["选中房源", "发起预约", "提交意向", "打开业务沟通"]
     if intent == "transaction_draft":
@@ -1023,6 +1348,58 @@ def build_next_actions(intent: str, state: dict[str, Any], tool_calls: list[dict
         return ["查看命中内容", "转成业务建议", "补充知识库文档"]
     visible = state.get("visibleActions") or []
     return [item.get("label") for item in visible if item.get("label")][:4]
+
+
+def infer_confirmed_chat_facts(messages: list[dict[str, Any]]) -> list[str]:
+    text = "\n".join(str(item.get("content") or "") for item in messages)
+    facts = []
+    checks = [
+        ("预算", ["预算", "租金", "价格", "月租"]),
+        ("入住时间", ["入住", "搬", "起租"]),
+        ("看房时间", ["看房", "约看", "预约", "时间"]),
+        ("通勤位置", ["通勤", "地铁", "公交", "上班", "公司"]),
+        ("付款押金", ["押金", "付款", "月付", "季付"]),
+        ("合同条款", ["合同", "条款", "违约", "维修"]),
+        ("家具家电", ["家具", "家电", "空调", "冰箱", "洗衣机"]),
+        ("客户意向", ["意向", "满意", "考虑", "成交", "签"]),
+    ]
+    for label, keywords in checks:
+        if any(keyword in text for keyword in keywords):
+            facts.append(label)
+    return facts
+
+
+def infer_missing_chat_facts(
+    biz_type: str,
+    messages: list[dict[str, Any]],
+    confirmed: list[str],
+) -> list[str]:
+    required_by_type = {
+        "appointment": ["看房时间", "入住时间", "预算", "通勤位置"],
+        "intention": ["预算", "入住时间", "付款押金", "客户意向"],
+        "contract": ["合同条款", "付款押金", "入住时间"],
+        "entrust": ["看房时间", "客户意向", "合同条款"],
+    }
+    required = required_by_type.get(biz_type or "", ["预算", "入住时间", "看房时间", "付款押金"])
+    return [item for item in required if item not in confirmed][:5]
+
+
+def build_chat_next_actions(state: dict[str, Any], chat: dict[str, Any]) -> list[str]:
+    biz_type = chat.get("bizType") or ((state.get("context") or {}).get("chat") or {}).get("bizType")
+    missing = chat.get("missingFacts") or []
+    if biz_type == "appointment":
+        actions = ["确认看房时间", "核实房源是否仍可租", "提醒看房重点"]
+    elif biz_type == "intention":
+        actions = ["确认意向等级", "补齐预算和入住时间", "判断是否推进签约"]
+    elif biz_type == "contract":
+        actions = ["核对租金押金", "确认交付清单", "记录合同修改意见"]
+    elif biz_type == "entrust":
+        actions = ["同步客户反馈", "确认委托范围", "约定后续带看节奏"]
+    else:
+        actions = ["确认对方核心诉求", "补齐缺失信息", "约定下一步时间"]
+    if missing:
+        actions.insert(0, "补充确认：" + "、".join(missing[:3]))
+    return actions[:4]
 
 
 def update_memory(session_key: str, user_message: str, answer: str) -> bool:

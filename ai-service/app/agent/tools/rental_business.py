@@ -23,7 +23,7 @@ def _post_java_tool(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     token = java_tools_token()
     if token:
         headers["X-AI-Tool-Token"] = token
-    response = httpx.post(f"{base_url}{path}", json=payload, headers=headers, timeout=8)
+    response = httpx.post(f"{base_url}{path}", json=payload, headers=headers, timeout=20)
     response.raise_for_status()
     data = response.json()
     return data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
@@ -69,6 +69,56 @@ def get_contract(state: dict[str, Any], contract_id: int | str | None) -> dict[s
         name="java.contract",
         path="/rental/ai/tools/contracts/detail",
         payload={"userId": state.get("user", {}).get("userId"), "contractId": contract_id},
+    )
+
+
+def get_house_map_context(
+    state: dict[str, Any],
+    house_id: int | str | None,
+    destination: str | None = None,
+    mode: str = "transit",
+) -> dict[str, Any]:
+    if not house_id:
+        return {"success": False, "message": "缺少房源 ID，无法查询通勤与周边"}
+    return safe_call(
+        _post_java_tool,
+        fallback={"success": False, "message": "高德房源上下文工具暂不可用"},
+        name="java.amap.house_context",
+        path="/rental/ai/tools/amap/house-context",
+        payload={
+            "userId": state.get("user", {}).get("userId"),
+            "role": state.get("user", {}).get("role") or state.get("role"),
+            "houseId": house_id,
+            "destination": destination,
+            "mode": mode or "transit",
+        },
+    )
+
+
+def search_amap_around(
+    state: dict[str, Any],
+    location: str | None,
+    keywords: str | None = None,
+    city: str | None = None,
+    radius: int | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    if not location:
+        return {"success": False, "message": "缺少坐标，无法查询周边"}
+    return safe_call(
+        _post_java_tool,
+        fallback={"success": False, "message": "高德周边搜索工具暂不可用"},
+        name="java.amap.around",
+        path="/rental/ai/tools/amap/around",
+        payload={
+            "userId": state.get("user", {}).get("userId"),
+            "role": state.get("user", {}).get("role") or state.get("role"),
+            "location": location,
+            "keywords": keywords or "地铁站|公交站|超市|商场|医院|药店|学校|幼儿园",
+            "city": city,
+            "radius": radius,
+            "limit": limit,
+        },
     )
 
 

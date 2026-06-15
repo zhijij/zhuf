@@ -1,15 +1,12 @@
 <template>
   <div class="ai-quick-rail" :class="{ 'is-open': open }">
-    <button class="rail-button" title="业务工具" @click="$emit('open-business')">
-      <el-icon><Briefcase /></el-icon>
-    </button>
     <button class="rail-button" title="消息中心" @click="$emit('open-messages')">
       <el-icon><Headset /></el-icon>
     </button>
     <button class="rail-button ai-entry" title="AI 助手" @click="openAssistant">
       <el-icon><Promotion /></el-icon>
     </button>
-    <button class="rail-button" title="使用指南">
+    <button class="rail-button" title="业务工具" @click="$emit('open-tools')">
       <el-icon><Document /></el-icon>
     </button>
   </div>
@@ -71,7 +68,7 @@
 
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { Aim, Briefcase, Close, Document, Headset, Promotion } from '@element-plus/icons-vue'
+import { Aim, Close, Document, Headset, Promotion } from '@element-plus/icons-vue'
 
 const open = defineModel('open', { type: Boolean, default: false })
 const input = defineModel('input', { type: String, default: '' })
@@ -82,7 +79,7 @@ const props = defineProps({
   presets: { type: Array, default: () => [] }
 })
 
-defineEmits(['open-business', 'open-messages', 'send'])
+defineEmits(['open-tools', 'open-messages', 'send'])
 
 const messageListRef = ref(null)
 const position = reactive({ x: 0, y: 0 })
@@ -93,9 +90,19 @@ watch(
   () => nextTick(scrollToBottom)
 )
 
-onMounted(resetPosition)
+onMounted(() => {
+  resetPosition()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', ensureInViewport)
+  }
+})
 
-onBeforeUnmount(stopDrag)
+onBeforeUnmount(() => {
+  stopDrag()
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', ensureInViewport)
+  }
+})
 
 function openAssistant() {
   open.value = true
@@ -104,7 +111,7 @@ function openAssistant() {
 
 function collaborationSummary(collaboration) {
   const experts = collaboration?.experts || []
-  if (!experts.length) return collaboration?.mode || '多智能体'
+  if (!experts.length) return ''
   return experts.map(item => item.label || item.name).slice(0, 2).join(' / ')
 }
 
@@ -114,6 +121,14 @@ function resetPosition() {
   const height = Math.min(620, window.innerHeight - 120)
   position.x = Math.max(16, window.innerWidth - width - 92)
   position.y = Math.max(84, window.innerHeight - height - 28)
+}
+
+function ensureInViewport() {
+  if (typeof window === 'undefined') return
+  const modalWidth = Math.min(420, window.innerWidth - 32)
+  const modalHeight = Math.min(620, window.innerHeight - 120)
+  position.x = clamp(position.x, 12, window.innerWidth - modalWidth - 12)
+  position.y = clamp(position.y, 72, window.innerHeight - modalHeight - 12)
 }
 
 function startDrag(event) {
@@ -162,6 +177,19 @@ function clamp(value, min, max) {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.ai-quick-rail button:focus,
+.ai-quick-rail button:focus-visible,
+.ai-float-modal button:focus,
+.ai-float-modal button:focus-visible {
+  outline: none;
+}
+
+.ai-float-modal :deep(.el-button:focus),
+.ai-float-modal :deep(.el-button:focus-visible) {
+  outline: none;
+  box-shadow: none;
 }
 
 .rail-button {
@@ -361,6 +389,23 @@ function clamp(value, min, max) {
   .ai-quick-rail {
     right: 14px;
     bottom: 64px;
+  }
+
+  .ai-float-modal {
+    right: 12px !important;
+    bottom: 12px !important;
+    left: 12px !important;
+    top: auto !important;
+    width: auto;
+    height: min(620px, calc(100vh - 96px));
+  }
+
+  .ai-float-head {
+    cursor: default;
+  }
+
+  .ai-float-presets {
+    padding-bottom: 2px;
   }
 }
 </style>

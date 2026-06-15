@@ -130,6 +130,54 @@
               </article>
             </section>
 
+            <section v-if="canUseTenantMap" v-loading="mapLoading" class="map-context-card">
+              <div class="map-context-head">
+                <div>
+                  <h3>通勤与周边</h3>
+                  <p>{{ mapContext?.summary || '按当前房源读取高德周边与通勤信息' }}</p>
+                </div>
+                <el-button plain icon="Refresh" @click="loadSelectedMapContext">刷新</el-button>
+              </div>
+
+              <div class="commute-bar">
+                <el-input
+                  v-model="commuteForm.destination"
+                  clearable
+                  placeholder="输入公司、学校或地铁站"
+                  @keyup.enter="runCommuteEstimate"
+                />
+                <el-segmented v-model="commuteForm.mode" :options="commuteModeOptions" />
+                <el-button type="primary" :disabled="!commuteForm.destination.trim()" @click="runCommuteEstimate">估算通勤</el-button>
+              </div>
+
+              <div v-if="mapContext?.route" class="route-summary">
+                <strong>{{ routeSummary(mapContext.route) }}</strong>
+                <span v-if="mapContext.route.distance">{{ formatDistance(mapContext.route.distance) }}</span>
+                <span v-if="mapContext.route.walkingDistance">步行 {{ formatDistance(mapContext.route.walkingDistance) }}</span>
+                <span v-if="mapContext.route.cost">约 {{ mapContext.route.cost }} 元</span>
+              </div>
+
+              <div v-if="nearbyGroups.length" class="nearby-grid">
+                <article v-for="group in nearbyGroups" :key="group.label">
+                  <div class="nearby-grid__head">
+                    <strong>{{ group.label }}</strong>
+                    <span>{{ group.fetched || (group.pois || []).length || 0 }} 条</span>
+                  </div>
+                  <ul>
+                    <li v-for="poi in (group.pois || []).slice(0, 3)" :key="`${group.label}-${poi.name}-${poi.distance}`">
+                      <span>{{ poi.name }}</span>
+                      <em>{{ formatDistance(poi.distance) }}</em>
+                    </li>
+                  </ul>
+                  <small v-if="group.truncated">已达单类 200 条上限</small>
+                  <small v-else>搜索半径 {{ formatDistance(group.radius || 1500) }}</small>
+                </article>
+              </div>
+
+              <p v-else-if="mapContext && !mapContext.configured" class="muted-tip">地图服务未配置，请在服务端设置 AMAP_API_KEY 后重试。</p>
+              <p v-else class="muted-tip">暂无周边数据，可以刷新或完善房源地址/坐标后再试。</p>
+            </section>
+
             <section class="process-card">
               <h3>业务流程</h3>
               <div class="process-steps">
@@ -146,6 +194,9 @@
                 <p>{{ currentRoleConfig.actionHint }}</p>
               </div>
               <div class="action-buttons">
+                <el-button v-if="workMode === 'owner'" type="primary" icon="Plus" @click="openTransaction('ownerCreateHouse')">
+                  新建房源
+                </el-button>
                 <el-button
                   v-for="action in visibleActions"
                   :key="action.key"
@@ -178,18 +229,10 @@
               </div>
             </section>
 
-            <section v-if="workMode === 'owner'" class="operation-card">
-              <h3>新建房源</h3>
+            <section v-if="workMode === 'owner' && selected.houseId && ['3', 3].includes(recordStatus(selected))" class="operation-card">
+              <h3>当前房源审核</h3>
               <div class="panel-actions">
-                <el-button type="primary" @click="openTransaction('ownerCreateHouse')">新建房源</el-button>
-                <el-button
-                  v-if="selected.houseId && ['3', 3].includes(recordStatus(selected))"
-                  plain
-                  @click="openTransaction('ownerSubmitAudit')"
-                >
-                  重新提交审核
-                </el-button>
-                <el-button plain @click="loadOwnerHistory">查看历史委托</el-button>
+                <el-button plain @click="openTransaction('ownerSubmitAudit')">重新提交审核</el-button>
               </div>
             </section>
 
@@ -263,13 +306,12 @@
               <p v-if="!canAuditSelectedHouse" class="muted-tip">当前房源不是待审核状态，只能查看不能重复审核。</p>
             </section>
 
-            <section v-if="workMode === 'tenant'" class="operation-card">
-              <h3>历史记录</h3>
+            <section
+              v-if="workMode === 'tenant' && (selected.favoriteId || selected.appointmentId || selected.intentionId || selected.houseId)"
+              class="operation-card"
+            >
+              <h3>当前房源记录</h3>
               <div class="panel-actions">
-                <el-button plain @click="loadTenantFavoritesFromWorkspace">我的收藏</el-button>
-                <el-button plain @click="loadTenantAppointmentsFromWorkspace">我的预约</el-button>
-                <el-button plain @click="loadTenantIntentionsFromWorkspace">我的意向</el-button>
-                <el-button plain @click="loadTenantContractsFromWorkspace">我的合同</el-button>
                 <el-button v-if="selected.favoriteId" plain @click="cancelFavoriteFromSelected">取消收藏</el-button>
                 <el-button v-if="selected.appointmentId" plain @click="cancelAppointmentFromSelected">取消预约</el-button>
                 <el-button v-if="selected.intentionId" plain @click="abandonIntentionFromSelected">放弃意向</el-button>
@@ -277,83 +319,19 @@
               </div>
             </section>
 
-            <section v-if="workMode === 'agent'" class="operation-card">
-              <h3>业务视图</h3>
+            <section v-if="workMode === 'agent' && selected.houseId" class="operation-card">
+              <h3>当前房源记录</h3>
               <div class="panel-actions">
-                <el-button plain @click="loadAgentHistory">我的受托房源</el-button>
                 <el-button v-if="selected.houseId" plain @click="loadAgentHouseDetailFromSelected">查看房源详情</el-button>
               </div>
             </section>
 
-            <section v-if="businessAiCard" class="business-ai-card">
-              <div>
-                <span>AI 辅助</span>
-                <h3>{{ businessAiCard.title }}</h3>
-                <p>{{ businessAiCard.description }}</p>
-              </div>
-              <div class="business-ai-actions">
-                <el-input
-                  v-if="workMode === 'tenant'"
-                  v-model="aiRecommend.query"
-                  clearable
-                  class="ai-inline-input"
-                  placeholder="预算、通勤、户型偏好"
-                  @keyup.enter="runBusinessAiAction"
-                />
-                <el-input-number
-                  v-if="workMode === 'tenant'"
-                  v-model="aiRecommend.maxRent"
-                  :min="0"
-                  controls-position="right"
-                  placeholder="预算上限"
-                />
-                <el-button type="primary" :loading="floatingAiLoading" @click="runBusinessAiAction">
-                  {{ businessAiCard.actionLabel }}
-                </el-button>
-                <el-button plain @click="openFloatingAi">打开助手</el-button>
-              </div>
-              <p v-if="workMode === 'tenant' && aiRecommendAnswer" class="ai-recommend-note">{{ aiRecommendAnswer }}</p>
-            </section>
           </template>
 
           <template v-else>
             <div class="empty-workspace">
               <el-empty :description="emptyDescription" :image-size="130" />
             </div>
-
-            <section v-if="workMode === 'owner'" class="operation-card">
-              <h3>新建房源</h3>
-              <div class="panel-actions">
-                <el-button type="primary" @click="openTransaction('ownerCreateHouse')">新建房源</el-button>
-              </div>
-            </section>
-
-            <section v-if="workMode === 'tenant'" class="operation-card">
-              <h3>找房入口</h3>
-              <div class="panel-actions">
-                <el-button type="primary" @click="refreshMode">刷新推荐房源</el-button>
-                <el-button plain @click="loadPortalPublicHouses">查看公开房源</el-button>
-                <el-button plain @click="loadTenantAppointmentsFromWorkspace">我的预约</el-button>
-                <el-button plain @click="loadTenantContractsFromWorkspace">我的合同</el-button>
-              </div>
-            </section>
-
-            <section v-if="workMode === 'agent'" class="operation-card">
-              <h3>中介工作入口</h3>
-              <div class="panel-actions">
-                <el-button type="primary" @click="loadAgentCandidateWorkspace">查看可承接房源</el-button>
-                <el-button plain @click="loadAgentHistory">我的受托房源</el-button>
-                <el-button plain @click="refreshMode">刷新业务队列</el-button>
-              </div>
-            </section>
-
-            <section v-if="workMode === 'contract'" class="operation-card">
-              <h3>合同入口</h3>
-              <div class="panel-actions">
-                <el-button type="primary" @click="refreshMode">刷新我的合同</el-button>
-                <el-button plain @click="openMessagePanel">打开消息中心</el-button>
-              </div>
-            </section>
 
             <section v-if="workMode === 'admin'" class="operation-card">
               <h3>合规审核入口</h3>
@@ -367,56 +345,133 @@
     </main>
 
     <main v-else class="agent-home">
-      <div class="agent-topline">
-        <button class="model-button">{{ aiAssistantProfile.badge }}</button>
-      </div>
-
-      <section class="agent-center" :class="{ 'has-chat': agentMessages.length > 1 }">
-        <div v-if="agentMessages.length <= 1" class="agent-hero">
-          <p>{{ aiAssistantProfile.eyebrow }}</p>
-          <h1>{{ aiAssistantProfile.title }}</h1>
-          <span class="agent-summary">{{ aiAssistantProfile.summary }}</span>
-          <div class="agent-capabilities">
-            <span v-for="item in aiAssistantProfile.capabilities" :key="item">{{ item }}</span>
+      <section class="agent-workspace">
+        <aside class="agent-record-panel">
+          <div class="agent-record-head">
+            <div>
+              <span>{{ aiAssistantProfile.badge }}</span>
+              <h2>选择业务上下文</h2>
+            </div>
+            <em>{{ filteredRecords.length }} 条</em>
           </div>
-        </div>
 
-        <div v-else class="agent-thread">
-          <div v-for="(item, index) in agentMessages" :key="index" :class="['agent-message', item.role]">
-            <div class="message-content">{{ item.content }}</div>
-            <div v-if="item.intentLabel || item.toolCalls?.length || item.collaboration" class="ai-trace">
-              <span v-if="item.intentLabel">意图：{{ item.intentLabel }}</span>
-              <span v-if="item.collaboration">主管协作：{{ collaborationSummary(item.collaboration) }}</span>
-              <span v-for="tool in item.toolCalls" :key="`${index}-${tool.name}`">
-                {{ tool.label || tool.name }} · {{ tool.status === 'success' ? '完成' : '异常' }}
-              </span>
+          <div v-if="isAdmin" class="admin-mode-badge">
+            合规审核
+          </div>
+          <div v-else class="role-tabs">
+            <button
+              v-for="item in roleModeOptions"
+              :key="item.value"
+              :class="{ active: workMode === item.value }"
+              @click="changeWorkMode(item.value)"
+            >
+              {{ item.shortLabel }}
+            </button>
+          </div>
+
+          <div class="agent-record-search">
+            <el-input v-model="filters.keyword" clearable placeholder="搜索房源、城市、编号、用户ID">
+              <template #prefix><el-icon><Search /></el-icon></template>
+            </el-input>
+            <el-select v-model="filters.status" clearable placeholder="全部状态">
+              <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+            <el-button plain icon="Refresh" @click="refreshMode">刷新</el-button>
+          </div>
+
+          <div v-loading="loading" class="records agent-records">
+            <button
+              v-for="item in filteredRecords"
+              :key="recordKey(item)"
+              class="record-card"
+              :class="{ active: recordKey(item) === recordKey(selected) }"
+              @click="selectRecord(item)"
+            >
+              <div class="record-card__top">
+                <strong>{{ recordTitle(item) }}</strong>
+                <span>{{ priceText(item) }}</span>
+              </div>
+              <div class="record-tags">
+                <em>{{ recordTypeLabel(item) }}</em>
+                <em>{{ recordStatusLabel(item) }}</em>
+                <em v-if="item.city">{{ item.city }}</em>
+                <em v-if="item.district">{{ item.district }}</em>
+              </div>
+              <div class="record-card__bottom">
+                <span>{{ ownerAgentText(item) }}</span>
+                <small>{{ recordIdText(item) }}</small>
+              </div>
+            </button>
+            <el-empty v-if="!loading && !filteredRecords.length" :description="emptyDescription" :image-size="90" />
+          </div>
+        </aside>
+
+        <section class="agent-center" :class="{ 'has-chat': agentMessages.length > 1 }">
+          <div class="agent-hero">
+            <h1>{{ aiAssistantProfile.title }}</h1>
+            <span class="agent-summary">{{ aiAssistantProfile.summary }}</span>
+          </div>
+
+          <section class="agent-context-card" :class="{ empty: !selected }">
+            <template v-if="selected">
+              <div class="agent-context-main">
+                <span>当前上下文</span>
+                <h2>{{ recordTitle(selected) }}</h2>
+                <p>{{ recordSubtitle(selected) }}</p>
+                <div class="detail-tags">
+                  <el-tag :type="tagType(recordStatus(selected), selected)" effect="plain">{{ recordStatusLabel(selected) }}</el-tag>
+                  <el-tag effect="plain">{{ recordTypeLabel(selected) }}</el-tag>
+                  <el-tag v-if="selected.houseId" effect="plain">房源 {{ selected.houseId }}</el-tag>
+                </div>
+              </div>
+              <div class="agent-context-actions">
+                <strong>{{ priceText(selected) }}</strong>
+                <el-button plain @click="openSelectedDetail">详情</el-button>
+                <el-button type="primary" plain @click="agentInput = `请基于当前${recordTypeLabel(selected)}给出下一步建议`">问智能体</el-button>
+              </div>
+            </template>
+            <template v-else>
+              <div class="agent-context-main">
+                <span>当前上下文</span>
+                <h2>先从左侧选择房源或业务记录</h2>
+                <p>选中后，智能体会自动带上该记录的房源、合同、预约或委托信息来回答。</p>
+              </div>
+            </template>
+          </section>
+
+          <div class="agent-thread">
+            <div v-for="(item, index) in agentMessages" :key="index" :class="['agent-message', item.role]">
+              <div class="message-content">{{ item.content }}</div>
+              <div v-if="item.intentLabel || item.toolCalls?.length || item.collaboration" class="ai-trace">
+                <span v-if="item.intentLabel">意图：{{ item.intentLabel }}</span>
+                <span v-if="item.collaboration">主管协作：{{ collaborationSummary(item.collaboration) }}</span>
+                <span v-for="tool in item.toolCalls" :key="`${index}-${tool.name}`">
+                  {{ tool.label || tool.name }} · {{ tool.status === 'success' ? '完成' : '异常' }}
+                </span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="agent-input-card">
-          <el-input
-            v-model="agentInput"
-            type="textarea"
-            :autosize="{ minRows: 1, maxRows: 5 }"
-            resize="none"
-            :placeholder="aiAssistantProfile.placeholder"
-            @keydown.ctrl.enter.prevent="sendAgentMessage"
-          />
-          <el-button circle icon="Promotion" type="primary" :loading="agentLoading" @click="sendAgentMessage" />
-        </div>
+          <div class="agent-input-card">
+            <el-input
+              v-model="agentInput"
+              type="textarea"
+              :autosize="{ minRows: 1, maxRows: 5 }"
+              resize="none"
+              :placeholder="selected ? `围绕「${recordTitle(selected)}」提问，Ctrl + Enter 发送` : aiAssistantProfile.placeholder"
+              @keydown.ctrl.enter.prevent="sendAgentMessage"
+            />
+            <el-button circle icon="Promotion" type="primary" :loading="agentLoading" @click="sendAgentMessage" />
+          </div>
 
-        <div class="agent-actions">
-          <button v-for="item in agentPresets" :key="item" @click="agentInput = item">
-            {{ item }}
-          </button>
-        </div>
+          <div class="agent-actions">
+            <button v-for="item in agentPresets" :key="item" @click="agentInput = item">
+              {{ item }}
+            </button>
+          </div>
+        </section>
       </section>
     </main>
-
-    <el-drawer v-model="messageOpen" title="消息" size="860px" append-to-body destroy-on-close @opened="prepareMessagePanel">
-      <BusinessChatPanel ref="messagePanelRef" auto-open />
-    </el-drawer>
 
     <el-drawer
       v-model="detailOpen"
@@ -522,14 +577,6 @@
       @process-task="processAiTask"
     />
 
-    <BusinessChatDrawer
-      v-model="chatOpen"
-      :biz-type="chatContext.bizType"
-      :biz-id="chatContext.bizId"
-      :session-id="chatContext.sessionId"
-      :title="chatContext.title"
-    />
-
     <el-dialog
       v-model="transactionDialog.visible"
       :title="transactionMeta.title"
@@ -558,6 +605,21 @@
           </div>
           <el-form-item label="详细地址" required>
             <el-input v-model="ownerHouse.address" placeholder="详细地址" />
+          </el-form-item>
+          <el-form-item label="地图定位">
+            <div class="owner-location-tool">
+              <div class="owner-location-tool__actions">
+                <el-button type="primary" icon="MapLocation" :loading="ownerLocationLoading" @click="openOwnerLocationPicker">
+                  {{ hasOwnerLocation ? '重新选择地图位置' : '打开地图选点' }}
+                </el-button>
+                <el-button v-if="hasOwnerLocation" text icon="Position" @click="openOwnerLocationMap">高德地图查看</el-button>
+              </div>
+              <div class="owner-location-preview" :class="{ active: hasOwnerLocation }">
+                <strong>{{ ownerLocationTitle }}</strong>
+                <span>{{ ownerLocationText }}</span>
+                <small v-if="hasOwnerLocation">经度 {{ ownerHouse.longitude }} / 纬度 {{ ownerHouse.latitude }}</small>
+              </div>
+            </div>
           </el-form-item>
           <div class="form-grid two">
             <el-form-item label="月租">
@@ -701,16 +763,149 @@
       </template>
     </el-dialog>
 
+    <el-dialog
+      v-model="ownerLocationPicker.visible"
+      title="地图确认房源位置"
+      width="760px"
+      append-to-body
+      destroy-on-close
+      class="owner-map-dialog"
+      @opened="initOwnerLocationPicker"
+      @closed="destroyOwnerLocationPicker"
+    >
+      <div class="owner-map-mode">
+        <el-segmented v-model="ownerLocationPicker.provider" :options="ownerMapProviderOptions" @change="switchOwnerMapProvider" />
+        <span>{{ ownerLocationPicker.provider === 'amap' ? '高德地图适合国内地址搜索' : '全球地图可直接点选经纬度' }}</span>
+      </div>
+      <div class="owner-map-search">
+        <el-input v-model="ownerLocationPicker.keyword" clearable placeholder="输入小区、道路或门牌号" @keyup.enter="searchOwnerLocationOnMap" />
+        <el-button type="primary" icon="Search" :loading="ownerLocationPicker.loading" @click="searchOwnerLocationOnMap">搜索定位</el-button>
+        <el-button plain icon="Aim" :loading="ownerLocationPicker.loading" @click="locateOwnerPickerByCurrentPosition">当前位置</el-button>
+      </div>
+      <div class="owner-coordinate-inputs">
+        <el-input v-model="ownerLocationPicker.longitude" placeholder="经度，例如 121.506377" />
+        <el-input v-model="ownerLocationPicker.latitude" placeholder="纬度，例如 31.245105" />
+        <el-button plain icon="Position" @click="applyOwnerManualCoordinate">应用坐标</el-button>
+      </div>
+      <div ref="ownerMapContainerRef" class="owner-map-container"></div>
+      <div class="owner-map-preview">
+        <strong>{{ ownerLocationPicker.address || ownerLocationLabel || ownerFullAddress() || '点击地图选择房源位置' }}</strong>
+        <span v-if="ownerLocationPicker.longitude && ownerLocationPicker.latitude">
+          经度 {{ ownerLocationPicker.longitude }} / 纬度 {{ ownerLocationPicker.latitude }}
+        </span>
+        <span v-else>可点击地图或拖动标记确认坐标。</span>
+      </div>
+      <template #footer>
+        <el-button @click="ownerLocationPicker.visible = false">取消</el-button>
+        <el-button type="primary" :disabled="!ownerLocationPicker.longitude || !ownerLocationPicker.latitude" @click="confirmOwnerLocationPicker">
+          确认位置
+        </el-button>
+      </template>
+    </el-dialog>
+
     <FloatingAiAssistant
       v-model:open="floatingAiOpen"
       v-model:input="floatingAiInput"
       :loading="floatingAiLoading"
       :messages="floatingAiMessages"
       :presets="floatingAiPresets"
-      @open-business="switchPage('business')"
+      @open-tools="openBusinessTools"
       @open-messages="openMessagePanel"
       @send="sendFloatingAiMessage"
     />
+
+    <el-drawer
+      v-model="businessToolsOpen"
+      direction="rtl"
+      size="420px"
+      append-to-body
+      class="business-tools-drawer"
+    >
+      <div class="business-tools-panel">
+        <header class="business-tools-hero">
+          <div class="tool-hero-icon">
+            <el-icon><Document /></el-icon>
+          </div>
+          <div>
+            <span>{{ roleLabel }}</span>
+            <h2>业务工具</h2>
+            <p>常用动作、历史记录和智能体能力集中在这里。</p>
+          </div>
+        </header>
+
+        <section v-if="businessAiCard" class="business-tool-card ai-card">
+          <div class="tool-section-head">
+            <div>
+              <span>AI 辅助</span>
+              <h3>{{ businessAiCard.title }}</h3>
+            </div>
+            <el-tag effect="plain" type="success">Smart Agent</el-tag>
+          </div>
+          <p>{{ businessAiCard.description }}</p>
+          <div class="business-tool-actions">
+            <el-input
+              v-if="workMode === 'tenant'"
+              v-model="aiRecommend.query"
+              clearable
+              placeholder="预算、通勤、户型偏好"
+              @keyup.enter="runBusinessAiAction"
+            />
+            <el-input-number
+              v-if="workMode === 'tenant'"
+              v-model="aiRecommend.maxRent"
+              :min="0"
+              controls-position="right"
+              placeholder="预算上限"
+            />
+            <el-button type="primary" :loading="floatingAiLoading" @click="runBusinessAiAction">
+              {{ businessAiCard.actionLabel }}
+            </el-button>
+            <el-button plain @click="openFloatingAi">打开助手</el-button>
+          </div>
+          <p v-if="workMode === 'tenant' && aiRecommendAnswer" class="ai-recommend-note">{{ aiRecommendAnswer }}</p>
+        </section>
+
+        <section class="business-tool-card compact">
+          <div class="tool-section-head">
+            <div>
+              <span>业务与历史</span>
+              <h3>快捷入口</h3>
+            </div>
+          </div>
+          <div class="business-tool-grid">
+            <button @click="runBusinessTool(() => switchPage('business'))">业务台</button>
+            <button v-if="workMode === 'tenant'" @click="runBusinessTool(loadTenantFavoritesFromWorkspace)">我的收藏</button>
+            <button v-if="workMode === 'tenant'" @click="runBusinessTool(loadTenantAppointmentsFromWorkspace)">我的预约</button>
+            <button v-if="workMode === 'tenant'" @click="runBusinessTool(loadTenantIntentionsFromWorkspace)">我的意向</button>
+            <button v-if="workMode === 'tenant'" @click="runBusinessTool(loadTenantContractsFromWorkspace)">我的合同</button>
+            <button v-else-if="visibleWorkModes.includes('contract')" @click="runBusinessTool(openContractsShortcut)">我的合同</button>
+            <button v-if="workMode === 'tenant'" @click="runBusinessTool(loadPortalPublicHouses)">公开房源</button>
+            <button v-if="workMode === 'owner'" @click="runBusinessTool(() => openTransaction('ownerCreateHouse'))">新建房源</button>
+            <button v-if="workMode === 'owner'" @click="runBusinessTool(loadOwnerHistory)">历史委托</button>
+            <button v-if="workMode === 'agent'" @click="runBusinessTool(loadAgentCandidateWorkspace)">可承接房源</button>
+            <button v-if="workMode === 'agent'" @click="runBusinessTool(loadAgentHistory)">我的受托房源</button>
+            <button v-if="workMode === 'contract'" @click="runBusinessTool(refreshMode)">刷新合同</button>
+            <button v-if="canOpenAiConsole" @click="runBusinessTool(openAiConsole)">AI 工作台</button>
+            <button @click="runBusinessTool(refreshCurrent)">刷新</button>
+            <button @click="runBusinessTool(openMessagePanel)">消息</button>
+          </div>
+        </section>
+
+        <section v-if="aiAssistantProfile.capabilities?.length" class="business-tool-card compact">
+          <div class="tool-section-head">
+            <div>
+              <span>当前智能体能力</span>
+              <h3>可直接询问</h3>
+            </div>
+          </div>
+          <div class="business-tool-tags">
+            <button v-for="item in aiAssistantProfile.capabilities" :key="item" @click="agentInput = item; openFloatingAi()">
+              {{ item }}
+            </button>
+          </div>
+        </section>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -718,10 +913,8 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, Promotion, Search } from '@element-plus/icons-vue'
+import { ArrowDown, Document, Promotion, Search } from '@element-plus/icons-vue'
 import useUserStore from '@/store/modules/user'
-import BusinessChatDrawer from './components/BusinessChatDrawer.vue'
-import BusinessChatPanel from './components/BusinessChatPanel.vue'
 import AiConsoleDrawer from './components/AiConsoleDrawer.vue'
 import FloatingAiAssistant from './components/FloatingAiAssistant.vue'
 import {
@@ -769,6 +962,15 @@ import {
   rejectOwnerEntrust
 } from '@/api/portal/owner'
 import {
+  createAmapLngLat,
+  createAmapPickerMap,
+  geocodeAddressByAmapJs,
+  getCurrentPositionByAmapJs,
+  isAmapJsConfigured,
+  reverseGeocodeByAmapJs
+} from '@/utils/amap'
+import { createGlobalLngLat, createGlobalPickerMap } from '@/utils/globalMap'
+import {
   listAgentEntrusts,
   listAgentCandidateHouses,
   applyAgentEntrust,
@@ -812,7 +1014,7 @@ import {
   seedKnowledgeDocuments
 } from '@/api/portal/ai'
 import { getPortalHomeSummary } from '@/api/portal/home'
-import { listPortalHouses, getPortalHouseDetail } from '@/api/portal/house'
+import { listPortalHouses, getPortalHouseDetail, getPortalHouseMapContext } from '@/api/portal/house'
 import { auditHouse, listAuditHouse } from '@/api/system/houseBusiness'
 
 const userStore = useUserStore()
@@ -823,12 +1025,8 @@ const loading = ref(false)
 const records = ref([])
 const selected = ref(null)
 const detailOpen = ref(false)
-const chatOpen = ref(false)
-const messageOpen = ref(false)
 const aiConsoleOpen = ref(false)
-const messagePanelRef = ref(null)
 const filters = reactive({ keyword: '', status: '' })
-const chatContext = reactive({ bizType: '', bizId: '', sessionId: '', title: '' })
 const transactionDialog = reactive({ visible: false, type: '', submitting: false, aiLoading: false, row: null })
 const tenantAppointment = reactive({ appointmentTime: '', remark: '' })
 const tenantIntention = reactive({ intentionLevel: '2', note: '' })
@@ -837,12 +1035,29 @@ const ownerHouse = reactive({
   city: '',
   district: '',
   address: '',
+  longitude: null,
+  latitude: null,
   rentAmount: null,
   area: null,
   operationMode: '0',
   imageUrls: '',
   description: ''
 })
+const ownerLocationLoading = ref(false)
+const ownerLocationLabel = ref('')
+const ownerMapContainerRef = ref(null)
+const ownerLocationPicker = reactive({
+  visible: false,
+  loading: false,
+  provider: 'amap',
+  keyword: '',
+  longitude: '',
+  latitude: '',
+  address: ''
+})
+let ownerPickerMap = null
+let ownerPickerMarker = null
+let ownerPickerMapProvider = ''
 const ownerEntrust = reactive({ agentId: '', entrustScope: '发布,预约,带看,签约', commissionRate: 0.02 })
 const agentApply = reactive({ entrustScope: '发布,预约,带看,签约', commissionRate: 0.02 })
 const contractOpinion = ref('')
@@ -862,6 +1077,9 @@ const workspaceSummary = reactive({ houseCount: 0, avgRent: 0, pricedHouseCount:
 const aiIndexTasks = ref([])
 const aiRecommend = reactive({ query: '', city: '北京', maxRent: null })
 const aiRecommendAnswer = ref('')
+const mapLoading = ref(false)
+const mapContext = ref(null)
+const commuteForm = reactive({ destination: '', mode: 'transit' })
 const aiHouseDocument = ref(null)
 const knowledgeSubmitting = ref(false)
 const knowledgeSeeding = ref(false)
@@ -885,13 +1103,20 @@ const agentInput = ref('')
 const agentLoading = ref(false)
 const agentMessages = ref([])
 const floatingAiOpen = ref(false)
+const businessToolsOpen = ref(false)
 const floatingAiLoading = ref(false)
 const floatingAiInput = ref('')
 const floatingAiMessages = ref([
   { role: 'assistant', content: '我是右下角 AI 助手，可以随时协助找房推荐、合同摘要、房源文案和业务跟进。' }
 ])
+const commuteModeOptions = [
+  { label: '公交', value: 'transit' },
+  { label: '驾车', value: 'driving' },
+  { label: '步行', value: 'walking' }
+]
 let recordsRequestSeq = 0
 let aiConsoleRequestSeq = 0
+let mapContextRequestSeq = 0
 
 const roles = computed(() => userStore.roles || [])
 const isAdmin = computed(() => roles.value.includes('auditor'))
@@ -929,6 +1154,12 @@ const canManageAiIndex = computed(() => roles.value.some(role => ['owner', 'agen
 const canRunFullAiSync = computed(() => roles.value.includes('auditor'))
 const canOpenAiConsole = computed(() => roles.value.includes('auditor'))
 const canManageContractLifecycle = computed(() => roles.value.includes('owner') || roles.value.includes('agent'))
+const canUseTenantMap = computed(() => workMode.value === 'tenant' && selected.value?.houseId && isTenantHouseContext(selected.value))
+const amapJsReady = computed(() => isAmapJsConfigured())
+const ownerMapProviderOptions = computed(() => [
+  { label: '高德', value: 'amap', disabled: !amapJsReady.value },
+  { label: '全球地图', value: 'global' }
+])
 const transactionMeta = computed(() => transactionConfigs[transactionDialog.type] || { title: '业务处理', submitText: '提交', form: 'none' })
 const latestAiTask = computed(() => aiIndexTasks.value[0] || null)
 const detailDrawerTitle = computed(() => selected.value ? `${recordTypeLabel(selected.value)}详情` : '详情')
@@ -954,6 +1185,15 @@ const knowledgeSourceText = computed(() => {
   return sources.map(item => knowledgeSourceLabels[item] || item).join('、')
 })
 const previewFields = computed(() => detailFields.value.slice(0, 6))
+const nearbyGroups = computed(() => mapContext.value?.nearbyGroups || [])
+const hasOwnerLocation = computed(() => ownerHouse.longitude !== null && ownerHouse.longitude !== '' && ownerHouse.latitude !== null && ownerHouse.latitude !== '')
+const ownerLocationTitle = computed(() => hasOwnerLocation.value ? '已确认房源地图位置' : '请在地图弹窗中选择房源位置')
+const ownerLocationText = computed(() => {
+  if (hasOwnerLocation.value) {
+    return ownerLocationLabel.value || ownerFullAddress()
+  }
+  return '户主建档必须先打开地图选点，坐标会用于租客通勤、周边配套和 AI 分析。'
+})
 const detailImageUrls = computed(() => {
   const raw = selected.value?.imageUrls || selected.value?.images || selected.value?.imageList
   if (Array.isArray(raw)) {
@@ -1030,6 +1270,8 @@ const detailFields = computed(() => {
       { key: 'city', label: '城市' },
       { key: 'district', label: '区域' },
       { key: 'address', label: '详细地址' },
+      { key: 'longitude', label: '经度' },
+      { key: 'latitude', label: '纬度' },
       { key: 'rentAmount', label: '租金', formatter: formatMoney },
       { key: 'area', label: '面积', formatter: value => value ? `${value} 平米` : '-' },
       { key: 'auditStatus', label: '审核状态', formatter: auditStatusLabel },
@@ -1062,6 +1304,9 @@ const detailFields = computed(() => {
       { key: 'houseId', label: '房源ID' },
       { key: 'city', label: '城市' },
       { key: 'district', label: '区域' },
+      { key: 'address', label: '详细地址' },
+      { key: 'longitude', label: '经度' },
+      { key: 'latitude', label: '纬度' },
       { key: 'rentAmount', label: '租金', formatter: formatMoney },
       { key: 'area', label: '面积', formatter: value => value ? `${value} 平米` : '-' },
       { key: 'ownerId', label: '户主ID' },
@@ -1185,6 +1430,26 @@ watch(filteredRecords, list => {
     selected.value = list[0] || null
   }
 })
+
+watch(
+  () => [workMode.value, selected.value?.houseId, selected.value?.appointmentId, selected.value?.intentionId, selected.value?.contractId],
+  () => {
+    if (canUseTenantMap.value) {
+      loadSelectedMapContext({ silent: true })
+    } else {
+      resetMapContext()
+    }
+  }
+)
+
+watch(
+  () => [ownerHouse.city, ownerHouse.district, ownerHouse.address],
+  () => {
+    if (hasOwnerLocation.value) {
+      resetOwnerLocation()
+    }
+  }
+)
 
 onMounted(() => {
   if (isAdmin.value) {
@@ -1339,20 +1604,14 @@ async function refreshAiConsole() {
 }
 
 function openMessagePanel() {
-  messageOpen.value = true
-}
-
-function prepareMessagePanel() {
-  messagePanelRef.value?.prepareSession()
+  router.push('/portal/chat')
 }
 
 async function refreshCurrent() {
-  if (pageMode.value === 'business') {
-    await Promise.all([
-      refreshMode(),
-      refreshAiOverview({ includeTasks: canManageAiIndex.value })
-    ])
-  }
+  await Promise.all([
+    refreshMode(),
+    refreshAiOverview({ includeTasks: canManageAiIndex.value })
+  ])
 }
 
 async function refreshMode() {
@@ -1436,6 +1695,10 @@ function rowsOf(response) {
   return response?.rows || response?.data || []
 }
 
+function payloadOf(response) {
+  return response?.data ?? response
+}
+
 function applyWorkspaceRows(rows) {
   records.value = Array.isArray(rows) ? rows : []
   selected.value = filteredRecords.value[0] || records.value[0] || null
@@ -1492,6 +1755,425 @@ async function hydrateSelectedDetail() {
   selected.value = { ...(res?.data || {}), _recordType: '门户房源详情' }
 }
 
+function resetMapContext() {
+  mapContextRequestSeq += 1
+  mapContext.value = null
+  mapLoading.value = false
+  commuteForm.destination = ''
+  commuteForm.mode = 'transit'
+}
+
+async function loadSelectedMapContext({ silent = false } = {}) {
+  if (!canUseTenantMap.value) {
+    resetMapContext()
+    return
+  }
+  const houseId = selected.value.houseId
+  const requestId = ++mapContextRequestSeq
+  mapLoading.value = true
+  try {
+    const destination = commuteForm.destination.trim()
+    const res = await getPortalHouseMapContext(houseId, {
+      destination: destination || undefined,
+      mode: commuteForm.mode
+    })
+    if (requestId !== mapContextRequestSeq || selected.value?.houseId !== houseId) return
+    mapContext.value = {
+      ...(res?.data || {}),
+      destination,
+      mode: commuteForm.mode
+    }
+    if (!silent && mapContext.value?.configured === false) {
+      ElMessage.warning('地图服务未配置，请在服务端设置高德 Key')
+    }
+  } catch (error) {
+    if (requestId === mapContextRequestSeq) {
+      mapContext.value = { configured: false, summary: '地图服务暂不可用', nearbyGroups: [] }
+    }
+    if (!silent) {
+      ElMessage.error('通勤与周边查询失败')
+    }
+  } finally {
+    if (requestId === mapContextRequestSeq) {
+      mapLoading.value = false
+    }
+  }
+}
+
+async function runCommuteEstimate() {
+  if (!canUseTenantMap.value) {
+    ElMessage.warning('请先选择租户可见房源')
+    return
+  }
+  if (!commuteForm.destination.trim()) {
+    ElMessage.warning('请输入目的地')
+    return
+  }
+  await loadSelectedMapContext()
+}
+
+async function locateOwnerHouse({ silent = false } = {}) {
+  if (!ownerHouse.city || !ownerHouse.district || !ownerHouse.address) {
+    if (!silent) ElMessage.warning('请先填写城市、区域和详细地址')
+    return false
+  }
+  if (!isAmapJsConfigured()) {
+    if (!silent) ElMessage.warning('请先配置前端高德 JS API Key：VITE_AMAP_JS_API_KEY')
+    return false
+  }
+  ownerLocationLoading.value = true
+  try {
+    const data = await geocodeAddressByAmapJs({
+      city: ownerHouse.city,
+      address: ownerFullAddress()
+    })
+    if (!data?.success || !data.longitude || !data.latitude) {
+      if (!silent) ElMessage.warning('未解析到房源坐标，请补全门牌、小区或道路信息')
+      return false
+    }
+    ownerHouse.longitude = String(data.longitude)
+    ownerHouse.latitude = String(data.latitude)
+    ownerLocationLabel.value = data.address || ownerFullAddress()
+    if (data.district && !ownerHouse.district) ownerHouse.district = data.district
+    if (!silent) ElMessage.success('已通过高德地图锁定房源坐标')
+    return true
+  } catch (error) {
+    if (!silent) ElMessage.error('地图定位失败，请检查高德 JS API Key、域名白名单或地址信息')
+    return false
+  } finally {
+    ownerLocationLoading.value = false
+  }
+}
+
+async function locateOwnerHouseByCurrentPosition() {
+  if (!isAmapJsConfigured()) {
+    ElMessage.warning('请先配置前端高德 JS API Key：VITE_AMAP_JS_API_KEY')
+    return false
+  }
+  ownerLocationLoading.value = true
+  try {
+    const position = await getCurrentPositionByAmapJs()
+    const longitude = position.longitude
+    const latitude = position.latitude
+    let addressInfo = position
+    try {
+      addressInfo = await reverseGeocodeByAmapJs({ longitude, latitude, city: ownerHouse.city || position.city })
+    } catch (error) {
+      addressInfo = position
+    }
+
+    ownerHouse.longitude = String(longitude)
+    ownerHouse.latitude = String(latitude)
+    if (!ownerHouse.city && addressInfo.city) ownerHouse.city = addressInfo.city
+    if (!ownerHouse.district && addressInfo.district) ownerHouse.district = addressInfo.district
+    if (!ownerHouse.address && addressInfo.address) ownerHouse.address = addressInfo.address
+    ownerLocationLabel.value = addressInfo.address || ownerFullAddress() || '当前位置'
+    ElMessage.success('已根据浏览器当前位置锁定房源坐标')
+    return true
+  } catch (error) {
+    ElMessage.error('当前位置获取失败，请允许浏览器定位并检查高德 JS API 配置')
+    return false
+  } finally {
+    ownerLocationLoading.value = false
+  }
+}
+
+function openOwnerLocationPicker() {
+  ownerLocationPicker.provider = amapJsReady.value ? 'amap' : 'global'
+  ownerLocationPicker.keyword = ownerFullAddress()
+  ownerLocationPicker.longitude = hasOwnerLocation.value ? String(ownerHouse.longitude) : ''
+  ownerLocationPicker.latitude = hasOwnerLocation.value ? String(ownerHouse.latitude) : ''
+  ownerLocationPicker.address = ownerLocationLabel.value || ownerFullAddress()
+  ownerLocationPicker.visible = true
+}
+
+async function initOwnerLocationPicker() {
+  if (!ownerMapContainerRef.value) return
+  ownerLocationPicker.loading = true
+  try {
+    await createOwnerPickerMap()
+  } catch (error) {
+    if (ownerLocationPicker.provider === 'amap') {
+      ownerLocationPicker.provider = 'global'
+      ElMessage.warning('高德地图不可用，已切换到全球地图手动选点')
+      await createOwnerPickerMap()
+    } else {
+      ElMessage.error('全球地图加载失败，请手动输入经纬度后应用')
+    }
+  } finally {
+    ownerLocationPicker.loading = false
+  }
+}
+
+async function createOwnerPickerMap() {
+  if (ownerLocationPicker.provider === 'amap' && !amapJsReady.value) {
+    ownerLocationPicker.provider = 'global'
+  }
+  let longitude = ownerLocationPicker.longitude
+  let latitude = ownerLocationPicker.latitude
+  if (ownerLocationPicker.provider === 'amap' && (!longitude || !latitude) && ownerFullAddress()) {
+    try {
+      const data = await geocodeAddressByAmapJs({ city: ownerHouse.city, address: ownerFullAddress() })
+      longitude = data.longitude
+      latitude = data.latitude
+      ownerLocationPicker.address = data.address || ownerFullAddress()
+    } catch (error) {
+      ownerLocationPicker.provider = 'global'
+      ElMessage.warning('地址解析不到，已切换到全球地图，请直接点击或输入经纬度')
+    }
+  }
+
+  if (ownerLocationPicker.provider === 'amap') {
+    const picker = await createAmapPickerMap(ownerMapContainerRef.value, { longitude, latitude })
+    ownerPickerMap = picker.map
+    ownerPickerMarker = picker.marker
+    ownerPickerMapProvider = 'amap'
+    ownerPickerMap.on('click', event => updateOwnerPickerPosition(event.lnglat))
+    ownerPickerMarker.on('dragend', event => updateOwnerPickerPosition(event.lnglat))
+    if (longitude && latitude) {
+      await updateOwnerPickerPosition(createAmapLngLat(longitude, latitude), { move: true })
+    }
+    return
+  }
+
+  const picker = await createGlobalPickerMap(ownerMapContainerRef.value, { longitude, latitude })
+  ownerPickerMap = picker.map
+  ownerPickerMarker = picker.marker
+  ownerPickerMapProvider = 'global'
+  ownerPickerMap.on('click', event => updateOwnerPickerPosition({ lng: event.latlng.lng, lat: event.latlng.lat }))
+  ownerPickerMarker.on('dragend', event => {
+    const latlng = event.target.getLatLng()
+    updateOwnerPickerPosition({ lng: latlng.lng, lat: latlng.lat })
+  })
+  if (longitude && latitude) {
+    await updateOwnerPickerPosition(createGlobalLngLat(longitude, latitude), { move: true })
+  }
+}
+
+function destroyOwnerLocationPicker() {
+  if (ownerPickerMap) {
+    try {
+      if (ownerPickerMapProvider === 'global' && typeof ownerPickerMap.remove === 'function') {
+        ownerPickerMap.remove()
+      } else if (typeof ownerPickerMap.destroy === 'function') {
+        ownerPickerMap.destroy()
+      } else if (typeof ownerPickerMap.remove === 'function') {
+        ownerPickerMap.remove()
+      }
+    } catch (error) {
+      console.warn('Owner map destroy failed:', error)
+    }
+  }
+  ownerPickerMap = null
+  ownerPickerMarker = null
+  ownerPickerMapProvider = ''
+  if (ownerMapContainerRef.value) {
+    ownerMapContainerRef.value.replaceChildren()
+    delete ownerMapContainerRef.value._leaflet_id
+  }
+}
+
+async function switchOwnerMapProvider() {
+  if (!ownerLocationPicker.visible || !ownerMapContainerRef.value) return
+  if (ownerLocationPicker.provider === 'amap' && !amapJsReady.value) {
+    ownerLocationPicker.provider = 'global'
+    ElMessage.warning('请先配置前端高德 JS API Key：VITE_AMAP_JS_API_KEY')
+    return
+  }
+  const requestedProvider = ownerLocationPicker.provider
+  destroyOwnerLocationPicker()
+  await nextTick()
+  ownerLocationPicker.loading = true
+  try {
+    await createOwnerPickerMap()
+  } catch (error) {
+    console.error('Owner map switch failed:', error)
+    destroyOwnerLocationPicker()
+    if (requestedProvider === 'amap') {
+      ownerLocationPicker.provider = 'global'
+      try {
+        await nextTick()
+        await createOwnerPickerMap()
+        ElMessage.warning('高德地图不可用，已切换到全球地图手动选点')
+        return
+      } catch (fallbackError) {
+        console.error('Owner map fallback failed:', fallbackError)
+      }
+    }
+    ElMessage.error('地图切换失败，请稍后重试或手动输入经纬度')
+  } finally {
+    ownerLocationPicker.loading = false
+  }
+}
+
+async function updateOwnerPickerPosition(lnglat, options = {}) {
+  if (!lnglat) return
+  const longitude = String(lnglat.lng)
+  const latitude = String(lnglat.lat)
+  ownerLocationPicker.longitude = longitude
+  ownerLocationPicker.latitude = latitude
+  if (ownerLocationPicker.provider === 'global') {
+    if (ownerPickerMarker) ownerPickerMarker.setLatLng([Number(latitude), Number(longitude)])
+    if (ownerPickerMap && options.move) ownerPickerMap.setView([Number(latitude), Number(longitude)], Math.max(ownerPickerMap.getZoom(), 15))
+    ownerLocationPicker.address = ownerLocationPicker.address || '已选择全球地图坐标'
+    return
+  }
+
+  if (ownerPickerMarker) ownerPickerMarker.setPosition(lnglat)
+  if (ownerPickerMap && options.move) ownerPickerMap.setCenter(lnglat)
+  if (isAmapJsConfigured()) {
+    try {
+      const data = await reverseGeocodeByAmapJs({ longitude, latitude, city: ownerHouse.city })
+      ownerLocationPicker.address = data.address || ownerLocationPicker.address
+    } catch (error) {
+      ownerLocationPicker.address = ownerLocationPicker.address || '已选择地图坐标'
+    }
+  }
+}
+
+async function applyOwnerManualCoordinate() {
+  const longitude = Number(ownerLocationPicker.longitude)
+  const latitude = Number(ownerLocationPicker.latitude)
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180 || !Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    ElMessage.warning('请输入有效经纬度：经度 -180~180，纬度 -90~90')
+    return
+  }
+  const lnglat = ownerLocationPicker.provider === 'global'
+    ? createGlobalLngLat(longitude, latitude)
+    : createAmapLngLat(longitude, latitude)
+  await updateOwnerPickerPosition(lnglat || { lng: longitude, lat: latitude }, { move: true })
+  ElMessage.success('已应用经纬度')
+}
+
+async function searchOwnerLocationOnMap() {
+  if (ownerLocationPicker.provider === 'global') {
+    ElMessage.info('全球地图模式请直接点击地图、拖动标记，或输入经纬度后应用')
+    return
+  }
+  const keyword = ownerLocationPicker.keyword.trim()
+  if (!keyword) {
+    ElMessage.warning('请输入小区、道路或门牌号')
+    return
+  }
+  ownerLocationPicker.loading = true
+  try {
+    const data = await geocodeAddressByAmapJs({ city: ownerHouse.city, address: keyword })
+    if (!data?.longitude || !data?.latitude) {
+      ElMessage.warning('未搜索到位置，已切换到全球地图，请直接点选')
+      ownerLocationPicker.provider = 'global'
+      destroyOwnerLocationPicker()
+      await nextTick()
+      await createOwnerPickerMap()
+      return
+    }
+    ownerLocationPicker.address = data.address || keyword
+    await updateOwnerPickerPosition(createAmapLngLat(data.longitude, data.latitude), { move: true })
+    if (ownerPickerMap) ownerPickerMap.setZoom(16)
+  } catch (error) {
+    ElMessage.warning('搜索定位失败，已切换到全球地图，请直接点选')
+    ownerLocationPicker.provider = 'global'
+    destroyOwnerLocationPicker()
+    await nextTick()
+    await createOwnerPickerMap()
+  } finally {
+    ownerLocationPicker.loading = false
+  }
+}
+
+async function locateOwnerPickerByCurrentPosition() {
+  ownerLocationPicker.loading = true
+  try {
+    const position = ownerLocationPicker.provider === 'global'
+      ? await getBrowserCurrentPosition()
+      : await getCurrentPositionByAmapJs()
+    ownerLocationPicker.address = position.address || ownerLocationPicker.address || '当前位置'
+    const lnglat = ownerLocationPicker.provider === 'global'
+      ? createGlobalLngLat(position.longitude, position.latitude)
+      : createAmapLngLat(position.longitude, position.latitude)
+    await updateOwnerPickerPosition(lnglat || { lng: Number(position.longitude), lat: Number(position.latitude) }, { move: true })
+    if (ownerPickerMap && ownerLocationPicker.provider === 'amap') ownerPickerMap.setZoom(17)
+  } catch (error) {
+    ElMessage.error('当前位置获取失败，请允许浏览器定位或改用地图搜索')
+  } finally {
+    ownerLocationPicker.loading = false
+  }
+}
+
+function getBrowserCurrentPosition() {
+  if (!navigator.geolocation) {
+    return Promise.reject(new Error('GEOLOCATION_UNSUPPORTED'))
+  }
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(
+      position => resolve({
+        longitude: String(position.coords.longitude),
+        latitude: String(position.coords.latitude),
+        accuracy: position.coords.accuracy,
+        address: ''
+      }),
+      reject,
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+    )
+  })
+}
+
+async function confirmOwnerLocationPicker() {
+  ownerHouse.longitude = String(ownerLocationPicker.longitude)
+  ownerHouse.latitude = String(ownerLocationPicker.latitude)
+  ownerLocationLabel.value = ownerLocationPicker.address || ownerFullAddress()
+  try {
+    const data = await reverseGeocodeByAmapJs({
+      longitude: ownerHouse.longitude,
+      latitude: ownerHouse.latitude,
+      city: ownerHouse.city
+    })
+    if (!ownerHouse.city && data.city) ownerHouse.city = data.city
+    if (!ownerHouse.district && data.district) ownerHouse.district = data.district
+    if (!ownerHouse.address && data.address) ownerHouse.address = data.address
+    ownerLocationLabel.value = data.address || ownerLocationLabel.value
+  } catch (error) {
+    // Coordinates are still valid even if reverse geocoding is unavailable.
+  }
+  ownerLocationPicker.visible = false
+  ElMessage.success('已确认房源地图位置')
+}
+
+function ownerFullAddress() {
+  return [ownerHouse.city, ownerHouse.district, ownerHouse.address]
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
+    .join('')
+}
+
+function resetOwnerLocation() {
+  ownerHouse.longitude = null
+  ownerHouse.latitude = null
+  ownerLocationLabel.value = ''
+}
+
+function resetOwnerHouseForm() {
+  Object.assign(ownerHouse, {
+    title: '',
+    city: '',
+    district: '',
+    address: '',
+    longitude: null,
+    latitude: null,
+    rentAmount: null,
+    area: null,
+    operationMode: '0',
+    imageUrls: '',
+    description: ''
+  })
+  ownerLocationLabel.value = ''
+}
+
+function openOwnerLocationMap() {
+  if (!hasOwnerLocation.value) return
+  const name = encodeURIComponent(ownerHouse.title || ownerLocationLabel.value || ownerFullAddress() || '房源位置')
+  window.open(`https://uri.amap.com/marker?position=${ownerHouse.longitude},${ownerHouse.latitude}&name=${name}`, '_blank', 'noopener,noreferrer')
+}
+
 function recordKey(item) {
   if (!item) return ''
   return `${item._recordType || workMode.value}-${item.entrustId || item.contractId || item.appointmentId || item.intentionId || item.houseId}`
@@ -1527,6 +2209,21 @@ function recordIdText(item) {
 
 function priceText(item) {
   return item?.rentAmount ? `${item.rentAmount} 元/月` : '-'
+}
+
+function formatDistance(value) {
+  const meters = Number(value)
+  if (!Number.isFinite(meters) || meters < 0) return '-'
+  if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`
+  return `${Math.round(meters)} m`
+}
+
+function routeSummary(route) {
+  if (!route) return '暂无路线'
+  if (route.summary) return route.summary
+  const minutes = Math.ceil(Number(route.duration || 0) / 60)
+  const modeMap = { transit: '公交', driving: '驾车', walking: '步行' }
+  return `${modeMap[route.mode] || '通勤'}约 ${minutes || '-'} 分钟`
 }
 
 function ownerAgentText(item) {
@@ -1714,11 +2411,15 @@ function isAgentEntrustedHouse(item) {
 }
 
 function openChat(target) {
-  chatContext.bizType = target.bizType
-  chatContext.bizId = target.bizId
-  chatContext.sessionId = target.sessionId || ''
-  chatContext.title = target.title
-  chatOpen.value = true
+  router.push({
+    path: '/portal/chat',
+    query: {
+      bizType: target.bizType || undefined,
+      bizId: target.bizId || undefined,
+      sessionId: target.sessionId || undefined,
+      title: target.title || undefined
+    }
+  })
 }
 
 function chatSessionFromResponse(response) {
@@ -1967,19 +2668,14 @@ async function createOwnerHouseFromForm() {
   if (!ownerHouse.title || !ownerHouse.city || !ownerHouse.district || !ownerHouse.address) {
     return ElMessage.warning('请完整填写房源基础信息')
   }
+  if (!hasOwnerLocation.value) {
+    ElMessage.warning('请先在地图弹窗中选择并确认房源位置')
+    openOwnerLocationPicker()
+    return
+  }
   await createOwnerHouse(ownerHouse)
   ElMessage.success('房源已提交审核')
-  Object.assign(ownerHouse, {
-    title: '',
-    city: '',
-    district: '',
-    address: '',
-    rentAmount: null,
-    area: null,
-    operationMode: '0',
-    imageUrls: '',
-    description: ''
-  })
+  resetOwnerHouseForm()
   await refreshMode()
 }
 
@@ -2371,6 +3067,21 @@ function openFloatingAi() {
   floatingAiOpen.value = true
 }
 
+function openBusinessTools() {
+  businessToolsOpen.value = true
+  if (pageMode.value !== 'business') {
+    switchPage('business')
+  }
+}
+
+async function runBusinessTool(handler) {
+  switchPage('business')
+  if (typeof handler === 'function') {
+    await handler()
+  }
+  businessToolsOpen.value = false
+}
+
 async function sendFloatingAiMessage() {
   const content = floatingAiInput.value.trim()
   if (!content) return
@@ -2432,6 +3143,7 @@ function buildAiRequest(message) {
       workMode: workMode.value,
       selected: selected.value ? buildAiRecordContext(selected.value) : null,
       filters: { ...filters },
+      mapContext: mapContext.value ? { ...mapContext.value } : null,
       visibleActions: visibleActions.value.map(item => ({ key: item.key, label: item.label })),
       summary: { ...workspaceSummary },
       history
@@ -2470,6 +3182,11 @@ function buildAiRecordContext(item) {
     district: item.district,
     community: item.community,
     address: item.address,
+    longitude: item.longitude,
+    latitude: item.latitude,
+    location: item.longitude !== undefined && item.longitude !== null && item.longitude !== '' && item.latitude !== undefined && item.latitude !== null && item.latitude !== ''
+      ? `${item.longitude},${item.latitude}`
+      : undefined,
     ownerId: item.ownerId,
     agentId: item.agentId,
     tenantId: item.tenantId,
@@ -2478,7 +3195,8 @@ function buildAiRecordContext(item) {
     endDate: item.endDate,
     description: item.description,
     facilities: item.facilities,
-    tags: item.tags
+    tags: item.tags,
+    mapContext: mapContext.value ? { ...mapContext.value } : null
   }
 }
 
@@ -2498,32 +3216,49 @@ function normalizeAiMessage(response) {
 
 function collaborationSummary(collaboration) {
   const experts = collaboration?.experts || []
-  if (!experts.length) return collaboration?.mode || '多智能体'
+  if (!experts.length) return ''
   return experts.map(item => item.label || item.name).slice(0, 3).join(' / ')
 }
 </script>
 
 <style scoped>
 .portal-shell {
-  --portal-ink: #172033;
-  --portal-muted: #667085;
-  --portal-line: #dfe5ea;
-  --portal-soft: #f6f8fb;
+  --portal-ink: #1f1f1f;
+  --portal-muted: #5f6368;
+  --portal-line: rgba(60, 64, 67, 0.12);
+  --portal-soft: #f0f4f9;
   --portal-surface: #ffffff;
-  --portal-primary: #2563eb;
-  --portal-primary-strong: #1e3a5f;
-  --portal-action: #0f766e;
-  --portal-accent: #b45309;
-  --portal-info: #475467;
+  --portal-primary: #0b57d0;
+  --portal-primary-strong: #e8f0fe;
+  --portal-action: #137333;
+  --portal-accent: #b06000;
+  --portal-info: #80868b;
   min-height: calc(100vh - 84px);
   color: var(--portal-ink);
-  background: #f5f7f8;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(26, 115, 232, 0.12), transparent 28%),
+    radial-gradient(circle at 84% 18%, rgba(147, 52, 230, 0.1), transparent 30%),
+    #f8fafd;
+}
+
+.portal-shell button:focus,
+.portal-shell button:focus-visible {
+  outline: none;
+}
+
+.portal-shell :deep(.el-button:focus),
+.portal-shell :deep(.el-button:focus-visible),
+.portal-shell :deep(.el-segmented__item:focus),
+.portal-shell :deep(.el-segmented__item:focus-visible) {
+  outline: none;
+  box-shadow: none;
 }
 
 .portal-shell.is-agent {
   background:
-    linear-gradient(180deg, rgba(30, 58, 95, 0.06), rgba(245, 247, 248, 0) 320px),
-    #f5f7f8;
+    radial-gradient(circle at 50% 8%, rgba(26, 115, 232, 0.14), transparent 32%),
+    radial-gradient(circle at 82% 18%, rgba(147, 52, 230, 0.1), transparent 28%),
+    #f8fafd;
 }
 
 .portal-header {
@@ -2535,16 +3270,18 @@ function collaborationSummary(collaboration) {
   align-items: center;
   height: 64px;
   padding: 0 32px;
-  background: rgba(255, 255, 255, 0.96);
+  background: rgba(255, 255, 255, 0.86);
   border-bottom: 1px solid var(--portal-line);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(18px);
 }
 
 .brand span {
   display: block;
-  color: var(--portal-ink);
+  color: transparent;
+  background: linear-gradient(90deg, #1a73e8, #9334e6 54%, #007b83);
+  background-clip: text;
   font-size: 18px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .brand small {
@@ -2556,9 +3293,9 @@ function collaborationSummary(collaboration) {
   grid-template-columns: repeat(2, 72px);
   width: 144px;
   height: 30px;
-  background: #eef3f4;
+  background: rgba(255, 255, 255, 0.72);
   border: 1px solid var(--portal-line);
-  border-radius: 8px;
+  border-radius: 999px;
   overflow: hidden;
 }
 
@@ -2574,8 +3311,7 @@ function collaborationSummary(collaboration) {
 
 .page-switch button.active {
   color: var(--portal-primary);
-  background: #fff;
-  box-shadow: 0 1px 8px rgba(37, 99, 235, 0.16);
+  background: #e8f0fe;
 }
 
 .header-actions {
@@ -2594,10 +3330,10 @@ function collaborationSummary(collaboration) {
   padding: 0 10px 0 6px;
   color: var(--portal-ink);
   cursor: pointer;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.72);
   border: 1px solid var(--portal-line);
   border-radius: 999px;
-  box-shadow: 0 10px 24px rgba(23, 32, 51, 0.06);
+  box-shadow: none;
 }
 
 .user-entry span {
@@ -2637,7 +3373,7 @@ function collaborationSummary(collaboration) {
   align-items: center;
   justify-content: center;
   height: 32px;
-  color: #fff;
+  color: #0b57d0;
   background: var(--portal-primary-strong);
   border-radius: 8px;
   font-size: 13px;
@@ -2651,25 +3387,24 @@ function collaborationSummary(collaboration) {
   align-items: center;
   height: 32px;
   padding: 2px;
-  background: #eef3f4;
+  background: rgba(255, 255, 255, 0.72);
   border: 1px solid var(--portal-line);
-  border-radius: 8px;
+  border-radius: 999px;
 }
 
 .role-tabs button {
   height: 26px;
-  color: #667085;
+  color: var(--portal-muted);
   cursor: pointer;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: 999px;
   font-size: 13px;
 }
 
 .role-tabs button.active {
   color: var(--portal-primary);
-  background: #fff;
-  box-shadow: 0 1px 5px rgba(15, 23, 42, 0.12);
+  background: #e8f0fe;
 }
 
 .hot-tags {
@@ -2685,9 +3420,9 @@ function collaborationSummary(collaboration) {
   padding: 5px 10px;
   color: var(--portal-primary);
   cursor: pointer;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.78);
   border: 1px solid var(--portal-line);
-  border-radius: 6px;
+  border-radius: 999px;
 }
 
 .business-workspace {
@@ -2700,7 +3435,8 @@ function collaborationSummary(collaboration) {
 .detail-card {
   background: var(--portal-surface);
   border: 1px solid var(--portal-line);
-  border-radius: 8px;
+  border-radius: 28px;
+  box-shadow: 0 18px 54px rgba(60, 64, 67, 0.08);
 }
 
 .result-list {
@@ -2732,7 +3468,7 @@ function collaborationSummary(collaboration) {
 }
 
 .list-head span {
-  color: #8a96a8;
+  color: var(--portal-info);
   font-size: 13px;
 }
 
@@ -2750,15 +3486,16 @@ function collaborationSummary(collaboration) {
   margin-bottom: 12px;
   text-align: left;
   cursor: pointer;
-  background: #fff;
+  background: #ffffff;
   border: 1px solid var(--portal-line);
-  border-radius: 8px;
+  border-radius: 22px;
 }
 
 .record-card:hover,
 .record-card.active {
-  border-color: var(--portal-primary);
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  background: #f8fbff;
+  border-color: rgba(11, 87, 208, 0.24);
+  box-shadow: inset 0 0 0 1px rgba(11, 87, 208, 0.08);
 }
 
 .record-card__top,
@@ -2770,8 +3507,12 @@ function collaborationSummary(collaboration) {
 }
 
 .record-card__top strong {
+  min-width: 0;
+  overflow: hidden;
   color: var(--portal-ink);
   font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .record-card__top span {
@@ -2791,15 +3532,19 @@ function collaborationSummary(collaboration) {
 .record-tags em {
   padding: 4px 8px;
   color: var(--portal-muted);
-  background: var(--portal-soft);
-  border-radius: 5px;
+  background: #f0f4f9;
+  border-radius: 999px;
   font-style: normal;
   font-size: 12px;
 }
 
 .record-card__bottom span,
 .record-card__bottom small {
+  min-width: 0;
+  overflow: hidden;
   color: var(--portal-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .detail-card {
@@ -2820,10 +3565,11 @@ function collaborationSummary(collaboration) {
   justify-content: space-between;
   gap: 18px;
   padding-bottom: 22px;
-  border-bottom: 1px solid #edf1f3;
+  border-bottom: 1px solid var(--portal-line);
 }
 
 .detail-head h2 {
+  overflow-wrap: anywhere;
   margin: 0 0 10px;
   color: var(--portal-ink);
   font-size: 28px;
@@ -2861,9 +3607,9 @@ function collaborationSummary(collaboration) {
 
 .field-grid article {
   padding: 14px;
-  background: var(--portal-soft);
+  background: #f8fafd;
   border: 1px solid var(--portal-line);
-  border-radius: 8px;
+  border-radius: 20px;
 }
 
 .field-grid span,
@@ -2893,9 +3639,9 @@ function collaborationSummary(collaboration) {
 
 .drawer-head {
   padding: 22px;
-  background: #fff;
+  background: var(--portal-surface);
   border: 1px solid var(--portal-line);
-  border-radius: 8px;
+  border-radius: 24px;
 }
 
 .detail-gallery {
@@ -2909,8 +3655,8 @@ function collaborationSummary(collaboration) {
   width: 100%;
   aspect-ratio: 4 / 3;
   overflow: hidden;
-  background: #e8edf3;
-  border-radius: 8px;
+  background: #f0f4f9;
+  border-radius: 20px;
 }
 
 .detail-grid {
@@ -2924,9 +3670,9 @@ function collaborationSummary(collaboration) {
 
 .drawer-note-list article {
   padding: 12px;
-  background: #fff;
+  background: #f8fafd;
   border: 1px solid var(--portal-line);
-  border-radius: 8px;
+  border-radius: 18px;
 }
 
 .drawer-note-list span {
@@ -2944,19 +3690,140 @@ function collaborationSummary(collaboration) {
 
 .process-card,
 .action-card,
-.operation-card {
+.operation-card,
+.map-context-card {
   padding: 18px;
   margin-top: 18px;
-  background: var(--portal-soft);
+  background: #f8fafd;
   border: 1px solid var(--portal-line);
-  border-radius: 8px;
+  border-radius: 24px;
 }
 
 .process-card h3,
 .action-card h3,
-.operation-card h3 {
+.operation-card h3,
+.map-context-card h3 {
   margin: 0 0 12px;
   color: var(--portal-ink);
+}
+
+.map-context-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.map-context-head > div {
+  min-width: 0;
+}
+
+.map-context-head p {
+  margin: 0;
+  color: var(--portal-muted);
+  line-height: 1.55;
+}
+
+.commute-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 188px auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.commute-bar :deep(.el-segmented) {
+  width: 188px;
+}
+
+.route-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 14px;
+  margin-top: 14px;
+  color: var(--portal-primary);
+  background: #e8f0fe;
+  border: 1px solid rgba(11, 87, 208, 0.16);
+  border-radius: 18px;
+}
+
+.route-summary strong {
+  margin-right: 4px;
+}
+
+.route-summary span {
+  color: var(--portal-muted);
+  font-size: 13px;
+}
+
+.nearby-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.nearby-grid article {
+  min-width: 0;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid var(--portal-line);
+  border-radius: 18px;
+}
+
+.nearby-grid__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.nearby-grid strong {
+  color: var(--portal-ink);
+  font-size: 14px;
+}
+
+.nearby-grid__head span,
+.nearby-grid small {
+  color: var(--portal-muted);
+  font-size: 12px;
+}
+
+.nearby-grid ul {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.nearby-grid li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.nearby-grid span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--portal-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nearby-grid em {
+  color: var(--portal-muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.nearby-grid small {
+  display: block;
+  margin-top: 10px;
 }
 
 .process-steps {
@@ -2998,6 +3865,10 @@ function collaborationSummary(collaboration) {
   gap: 16px;
 }
 
+.action-card > div:first-child {
+  min-width: 0;
+}
+
 .action-card p {
   margin: 0;
   color: var(--portal-muted);
@@ -3010,57 +3881,183 @@ function collaborationSummary(collaboration) {
   gap: 8px;
 }
 
-.business-ai-card {
+.business-tools-drawer :deep(.el-drawer__header) {
+  display: none;
+}
+
+.business-tools-drawer :deep(.el-drawer__body) {
+  padding: 0;
+  background: #f6f8fb;
+}
+
+.business-tools-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 520px);
-  gap: 18px;
+  gap: 14px;
+  padding: 16px;
+}
+
+.business-tools-hero {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 12px;
   align-items: center;
-  padding: 20px;
-  margin-top: 18px;
-  background: linear-gradient(135deg, #f7fbff, #eff6ff 48%, #f9fafb);
-  border: 1px solid #d7e3f7;
+  padding: 16px;
+  color: #fff;
+  background: #1e3a5f;
+  border-radius: 8px;
+  box-shadow: 0 16px 34px rgba(30, 58, 95, 0.2);
+}
+
+.tool-hero-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 8px;
 }
 
-.business-ai-card > div:first-child span {
+.tool-hero-icon .el-icon {
+  font-size: 25px;
+}
+
+.business-tools-hero span,
+.business-tools-hero h2,
+.business-tools-hero p {
   display: block;
-  margin-bottom: 8px;
-  color: #0f766e;
+  margin: 0;
+}
+
+.business-tools-hero span {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+}
+
+.business-tools-hero h2 {
+  margin-top: 4px;
+  font-size: 20px;
+}
+
+.business-tools-hero p {
+  margin-top: 6px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.business-tool-card {
+  padding: 15px;
+  background: #ffffff;
+  border: 1px solid #dfe5ea;
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(30, 42, 62, 0.06);
+}
+
+.business-tool-card.ai-card {
+  background: #fbfdff;
+}
+
+.business-tool-card.compact {
+  background: #ffffff;
+}
+
+.tool-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.tool-section-head span {
+  display: block;
+  margin-bottom: 5px;
+  color: #2563eb;
   font-size: 12px;
   font-weight: 700;
 }
 
-.business-ai-card h3 {
+.tool-section-head h3 {
   margin: 0;
-  color: var(--portal-ink);
+  color: #121a31;
+  font-size: 16px;
 }
 
-.business-ai-card p {
-  margin: 10px 0 0;
-  color: var(--portal-muted);
-  line-height: 1.65;
+.business-tool-card p {
+  margin: 8px 0 0;
+  color: #5f6368;
+  line-height: 1.6;
 }
 
-.business-ai-actions {
+.business-tool-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 140px auto auto;
+  grid-template-columns: 1fr;
   gap: 10px;
-  align-items: center;
+  margin-top: 14px;
 }
 
-.ai-inline-input,
-.business-ai-actions :deep(.el-input-number) {
+.business-tool-actions :deep(.el-input-number) {
   width: 100%;
+}
+
+.business-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.business-tool-grid button {
+  min-height: 42px;
+  padding: 0 10px;
+  color: #1f2937;
+  cursor: pointer;
+  background: #f8fafd;
+  border: 1px solid #dfe5ea;
+  border-radius: 8px;
+  font-size: 13px;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.business-tool-grid button:hover {
+  color: #0b57d0;
+  background: #eef4ff;
+  border-color: #b7c8f8;
+  transform: translateY(-1px);
+}
+
+.business-tool-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.business-tool-tags button {
+  min-height: 34px;
+  padding: 0 12px;
+  color: #42526e;
+  cursor: pointer;
+  background: #f8fafd;
+  border: 1px solid #dfe5ea;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.business-tool-tags button:hover {
+  color: #0b57d0;
+  background: #eef4ff;
+  border-color: #b7c8f8;
 }
 
 .ai-recommend-note {
   grid-column: 1 / -1;
   margin: 0;
   padding: 12px 14px;
-  color: #334155;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid #dbe7f7;
-  border-radius: 8px;
+  color: var(--portal-ink);
+  background: #ffffff;
+  border: 1px solid var(--portal-line);
+  border-radius: 18px;
 }
 
 .panel-actions {
@@ -3071,7 +4068,7 @@ function collaborationSummary(collaboration) {
 }
 
 .compliance-card {
-  background: #f8fafc;
+  background: #fce8e6;
 }
 
 .compliance-checks {
@@ -3083,9 +4080,9 @@ function collaborationSummary(collaboration) {
 .compliance-checks span {
   padding: 8px 10px;
   color: var(--portal-muted);
-  background: #fff;
+  background: #ffffff;
   border: 1px solid var(--portal-line);
-  border-radius: 6px;
+  border-radius: 999px;
   text-align: center;
   font-size: 12px;
 }
@@ -3132,9 +4129,9 @@ function collaborationSummary(collaboration) {
 }
 
 .table-shell {
-  background: #fff;
+  background: var(--portal-surface);
   border: 1px solid var(--portal-line);
-  border-radius: 8px;
+  border-radius: 20px;
 }
 
 .table-shell {
@@ -3188,9 +4185,9 @@ function collaborationSummary(collaboration) {
 .transaction-summary {
   padding: 14px;
   margin-bottom: 10px;
-  background: var(--portal-soft);
+  background: #f8fafd;
   border: 1px solid var(--portal-line);
-  border-radius: 8px;
+  border-radius: 18px;
 }
 
 .transaction-summary strong {
@@ -3214,6 +4211,105 @@ function collaborationSummary(collaboration) {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.owner-location-tool {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.owner-location-tool__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.owner-location-preview {
+  display: grid;
+  gap: 4px;
+  min-height: 76px;
+  padding: 12px 14px;
+  background: #f8fafd;
+  border: 1px dashed var(--portal-line);
+  border-radius: 8px;
+}
+
+.owner-location-preview.active {
+  background: #eef5ff;
+  border-color: rgba(11, 87, 208, 0.24);
+}
+
+.owner-location-preview strong {
+  color: var(--portal-ink);
+  font-size: 14px;
+}
+
+.owner-location-preview span,
+.owner-location-preview small {
+  color: var(--portal-muted);
+  line-height: 1.5;
+}
+
+.owner-location-preview small {
+  font-size: 12px;
+}
+
+.owner-map-mode {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.owner-map-mode span {
+  color: var(--portal-muted);
+  font-size: 13px;
+}
+
+.owner-map-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.owner-coordinate-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.owner-map-container {
+  width: 100%;
+  height: min(52vh, 420px);
+  min-height: 320px;
+  overflow: hidden;
+  background: #f0f4f9;
+  border: 1px solid var(--portal-line);
+  border-radius: 8px;
+}
+
+.owner-map-preview {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  margin-top: 12px;
+  background: #f8fafd;
+  border: 1px solid var(--portal-line);
+  border-radius: 8px;
+}
+
+.owner-map-preview strong {
+  color: var(--portal-ink);
+  line-height: 1.5;
+}
+
+.owner-map-preview span {
+  color: var(--portal-muted);
+  font-size: 13px;
+}
+
 .transaction-form :deep(.el-select),
 .transaction-form :deep(.el-date-editor),
 .transaction-form :deep(.el-input-number) {
@@ -3235,83 +4331,173 @@ function collaborationSummary(collaboration) {
   background: transparent;
 }
 
-.agent-topline {
-  display: flex;
-  justify-content: flex-start;
-  padding: 18px 32px;
-}
-
 .model-button {
   height: 34px;
   padding: 0 12px;
-  color: #1e3a5f;
+  color: var(--portal-primary);
   cursor: pointer;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.78);
   border: 1px solid var(--portal-line);
-  border-radius: 8px;
+  border-radius: 999px;
   font-size: 14px;
+  font-weight: 600;
+}
+
+.agent-workspace {
+  display: grid;
+  grid-template-columns: 420px minmax(0, 1fr);
+  gap: 18px;
+  width: min(1480px, calc(100vw - 48px));
+  min-height: calc(100vh - 112px);
+  margin: 0 auto;
+  padding: 24px 0 36px;
+}
+
+.agent-record-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 18px;
+  background: var(--portal-surface);
+  border: 1px solid var(--portal-line);
+  border-radius: 28px;
+  box-shadow: 0 18px 54px rgba(60, 64, 67, 0.08);
+}
+
+.agent-record-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.agent-record-head span,
+.agent-context-main span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--portal-primary);
+  font-size: 12px;
   font-weight: 700;
+}
+
+.agent-record-head h2,
+.agent-context-main h2 {
+  margin: 0;
+  color: var(--portal-ink);
+  font-size: 18px;
+}
+
+.agent-record-head em {
+  color: var(--portal-muted);
+  font-style: normal;
+  font-size: 13px;
+}
+
+.agent-record-panel .role-tabs,
+.agent-record-panel .admin-mode-badge {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.agent-record-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 128px auto;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.agent-records {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  padding-right: 2px;
 }
 
 .agent-center {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: calc(100vh - 250px);
-  padding: 24px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 0 0;
 }
 
 .agent-center.has-chat {
-  justify-content: flex-end;
+  justify-content: stretch;
+}
+
+.agent-hero {
+  padding: 24px 8px 6px;
 }
 
 .agent-hero h1 {
-  margin: 0 0 22px;
-  color: var(--portal-ink);
-  font-size: 34px;
-  font-weight: 700;
-}
-
-.agent-hero p {
-  margin: 0 0 10px;
-  color: var(--portal-primary);
-  text-align: center;
-  font-size: 13px;
+  margin: 0 0 12px;
+  color: transparent;
+  background: linear-gradient(90deg, #1a73e8, #9334e6 54%, #007b83);
+  background-clip: text;
+  font-size: 38px;
   font-weight: 700;
 }
 
 .agent-summary {
   display: block;
   width: min(760px, 100%);
-  margin: 0 auto 22px;
-  color: #4b5563;
-  text-align: center;
+  margin: 0 0 18px;
+  color: var(--portal-muted);
   line-height: 1.75;
 }
 
-.agent-capabilities {
+.agent-context-card {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  width: min(640px, 100%);
-  margin: 0 auto 28px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px;
+  margin-bottom: 14px;
+  background: var(--portal-surface);
+  border: 1px solid var(--portal-line);
+  border-radius: 24px;
+  box-shadow: 0 18px 54px rgba(60, 64, 67, 0.08);
 }
 
-.agent-capabilities span {
-  padding: 10px 12px;
-  color: #344054;
-  text-align: center;
-  background: #fff;
-  border: 1px solid var(--portal-line);
-  border-radius: 8px;
-  font-size: 13px;
+.agent-context-card.empty {
+  grid-template-columns: 1fr;
+}
+
+.agent-context-main {
+  min-width: 0;
+}
+
+.agent-context-main h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-context-main p {
+  margin: 8px 0 10px;
+  color: var(--portal-muted);
+  line-height: 1.6;
+}
+
+.agent-context-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.agent-context-actions strong {
+  margin-right: 4px;
+  color: var(--portal-primary);
+  white-space: nowrap;
 }
 
 .agent-thread {
-  width: min(880px, 100%);
-  max-height: calc(100vh - 330px);
-  margin-bottom: 24px;
+  min-height: 260px;
+  padding: 4px 6px 12px;
+  margin-bottom: 14px;
   overflow-y: auto;
 }
 
@@ -3319,21 +4505,21 @@ function collaborationSummary(collaboration) {
   max-width: 76%;
   padding: 12px 14px;
   margin-bottom: 12px;
-  border-radius: 8px;
+  border-radius: 22px;
   line-height: 1.7;
   white-space: pre-wrap;
 }
 
 .agent-message.assistant {
   color: var(--portal-ink);
-  background: #fff;
+  background: #ffffff;
   border: 1px solid var(--portal-line);
 }
 
 .agent-message.user {
   margin-left: auto;
-  color: #fff;
-  background: var(--portal-primary);
+  color: #0b57d0;
+  background: var(--portal-primary-strong);
 }
 
 .agent-input-card {
@@ -3341,13 +4527,13 @@ function collaborationSummary(collaboration) {
   grid-template-columns: minmax(0, 1fr) 42px;
   align-items: center;
   gap: 10px;
-  width: min(860px, 100%);
+  width: 100%;
   min-height: 60px;
   padding: 8px 10px 8px 18px;
-  background: #fff;
+  background: var(--portal-surface);
   border: 1px solid var(--portal-line);
-  border-radius: 24px;
-  box-shadow: 0 18px 42px rgba(31, 41, 55, 0.12);
+  border-radius: 30px;
+  box-shadow: 0 18px 54px rgba(60, 64, 67, 0.14);
 }
 
 .agent-input-card :deep(.el-textarea__inner) {
@@ -3359,8 +4545,9 @@ function collaborationSummary(collaboration) {
 
 .agent-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
-  margin-top: 24px;
+  margin-top: 14px;
 }
 
 .agent-actions button {
@@ -3368,7 +4555,7 @@ function collaborationSummary(collaboration) {
   padding: 0 18px;
   color: var(--portal-muted);
   cursor: pointer;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.78);
   border: 1px solid var(--portal-line);
   border-radius: 22px;
 }
@@ -3386,9 +4573,9 @@ function collaborationSummary(collaboration) {
 
 .ai-trace span {
   padding: 3px 7px;
-  color: #1e3a5f;
-  background: #eef4ff;
-  border: 1px solid #c7d7fe;
+  color: var(--portal-primary);
+  background: #e8f0fe;
+  border: 1px solid rgba(11, 87, 208, 0.16);
   border-radius: 999px;
   font-size: 12px;
   line-height: 1.4;
@@ -3417,9 +4604,16 @@ function collaborationSummary(collaboration) {
 
   .business-search,
   .business-workspace,
+  .agent-workspace,
+  .agent-record-search,
+  .agent-context-card,
   .field-grid,
+  .nearby-grid,
+  .commute-bar,
+  .owner-map-mode,
+  .owner-map-search,
+  .owner-coordinate-inputs,
   .process-steps,
-  .agent-capabilities,
   .inline-form,
   .inline-form.compact,
   .deal-form,
@@ -3427,13 +4621,24 @@ function collaborationSummary(collaboration) {
     grid-template-columns: 1fr;
   }
 
+  .commute-bar :deep(.el-segmented) {
+    width: 100%;
+  }
+
   .business-page {
     width: min(100%, calc(100vw - 28px));
     padding-top: 16px;
   }
 
+  .agent-workspace {
+    width: min(100%, calc(100vw - 28px));
+    min-height: auto;
+    padding-top: 16px;
+  }
+
   .detail-card,
-  .result-list {
+  .result-list,
+  .agent-record-panel {
     min-height: auto;
   }
 
@@ -3445,6 +4650,18 @@ function collaborationSummary(collaboration) {
     max-height: none;
     min-height: auto;
   }
+
+  .action-card,
+  .detail-head {
+    display: grid;
+  }
+
+  .detail-head__aside,
+  .action-buttons,
+  .agent-context-actions {
+    justify-items: start;
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 720px) {
@@ -3454,8 +4671,24 @@ function collaborationSummary(collaboration) {
   }
 
   .agent-center {
-    min-height: calc(100vh - 220px);
-    padding: 18px 14px;
+    min-height: auto;
+    padding: 0;
+  }
+
+  .agent-record-panel {
+    padding: 14px;
+  }
+
+  .agent-hero {
+    padding: 8px 2px 0;
+  }
+
+  .agent-summary {
+    text-align: center;
+  }
+
+  .agent-context-actions {
+    flex-wrap: wrap;
   }
 
   .agent-actions {
@@ -3476,6 +4709,32 @@ function collaborationSummary(collaboration) {
   .user-entry span,
   .user-entry .el-icon {
     display: none;
+  }
+
+  .business-search {
+    margin-bottom: 12px;
+  }
+
+  .hot-tags {
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .hot-tags span,
+  .hot-tags button {
+    flex: 0 0 auto;
+  }
+
+  .detail-card {
+    padding: 18px;
+  }
+
+  .record-card__top,
+  .record-card__bottom {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
   }
 }
 </style>

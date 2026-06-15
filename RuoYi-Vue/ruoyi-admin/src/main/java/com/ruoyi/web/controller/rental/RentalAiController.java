@@ -423,6 +423,11 @@ public class RentalAiController
         document.put("street", house.getStreet());
         document.put("community", house.getCommunity());
         document.put("address", house.getAddress());
+        document.put("longitude", house.getLongitude());
+        document.put("latitude", house.getLatitude());
+        document.put("location", house.getLongitude() == null || house.getLatitude() == null ? null
+                : house.getLongitude().stripTrailingZeros().toPlainString() + ","
+                        + house.getLatitude().stripTrailingZeros().toPlainString());
         document.put("rentAmount", house.getRentAmount());
         document.put("depositAmount", house.getDepositAmount());
         document.put("area", house.getArea());
@@ -507,6 +512,8 @@ public class RentalAiController
         appendContent(content, "区域", house.getDistrict());
         appendContent(content, "小区", house.getCommunity());
         appendContent(content, "地址", house.getAddress());
+        appendContent(content, "经度", house.getLongitude());
+        appendContent(content, "纬度", house.getLatitude());
         appendContent(content, "租金", house.getRentAmount());
         appendContent(content, "押金", house.getDepositAmount());
         appendContent(content, "面积", house.getArea());

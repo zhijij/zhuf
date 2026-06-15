@@ -1,6 +1,7 @@
 import hashlib
 import json
 import math
+import os
 from typing import Any
 
 import httpx
@@ -20,6 +21,9 @@ from app.config import (
     VECTOR_DB_PORT,
     VECTOR_DB_USER,
 )
+
+
+DEFAULT_KNOWLEDGE_MIN_SCORE = float(os.getenv("AI_KNOWLEDGE_MIN_SCORE", "0.12"))
 
 
 def ensure_vector_store() -> None:
@@ -323,15 +327,41 @@ def search_vector_houses(query: str, city: str | None, max_rent: int | None) -> 
     return results
 
 
-def search_vector_knowledge(query: str, role: str | None = None) -> list[dict[str, Any]]:
+def search_vector_knowledge(
+    query: str,
+    role: str | None = None,
+    source_types: list[str] | None = None,
+    min_score: float | None = None,
+) -> list[dict[str, Any]]:
     if not store.DB_READY or not query.strip():
         return []
     vector = create_embedding(query)
+    source_types = [item for item in (source_types or []) if item]
+    threshold = DEFAULT_KNOWLEDGE_MIN_SCORE if min_score is None else float(min_score)
     try:
         with db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    f"""
+                if source_types:
+                    cur.execute(
+                        f"""
+                    SELECT DISTINCT ON (source_type, source_id)
+                        source_type,
+                        source_id,
+                        title,
+                        roles,
+                        payload,
+                        content,
+                        1 - (embedding <=> %s::vector) AS similarity
+                    FROM ai_knowledge_chunks
+                    WHERE source_type = ANY(%s)
+                    ORDER BY source_type, source_id, embedding <=> %s::vector
+                    LIMIT 18
+                    """,
+                        (vector_literal(vector), source_types, vector_literal(vector)),
+                    )
+                else:
+                    cur.execute(
+                        f"""
                     SELECT DISTINCT ON (source_type, source_id)
                         source_type,
                         source_id,
@@ -342,10 +372,10 @@ def search_vector_knowledge(query: str, role: str | None = None) -> list[dict[st
                         1 - (embedding <=> %s::vector) AS similarity
                     FROM ai_knowledge_chunks
                     ORDER BY source_type, source_id, embedding <=> %s::vector
-                    LIMIT 12
+                    LIMIT 18
                     """,
-                    (vector_literal(vector), vector_literal(vector)),
-                )
+                        (vector_literal(vector), vector_literal(vector)),
+                    )
                 rows = cur.fetchall()
     except Exception:
         return []
@@ -358,6 +388,8 @@ def search_vector_knowledge(query: str, role: str | None = None) -> list[dict[st
         score = float(row[6] or 0)
         if role and (not role_text or role in role_text):
             score += 0.05
+        if threshold > 0 and score < threshold:
+            continue
         results.append({
             **data,
             "sourceType": row[0],

@@ -16,6 +16,14 @@ export function createOwnerHouse(data) {
   })
 }
 
+export function geocodeOwnerHouse(query) {
+  return request({
+    url: '/rental/owner/houses/geocode',
+    method: 'get',
+    params: query
+  })
+}
+
 export function getOwnerHouse(houseId) {
   return request({
     url: `/rental/owner/houses/${houseId}`,

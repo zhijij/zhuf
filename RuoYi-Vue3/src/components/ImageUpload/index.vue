@@ -109,6 +109,13 @@ const showTip = computed(
   () => props.isShowTip && (props.fileType || props.fileSize)
 )
 
+function resolveResourceUrl(url) {
+  if (!url) {
+    return ""
+  }
+  return isExternal(url) ? url : baseUrl + url
+}
+
 watch(() => props.modelValue, val => {
   if (val) {
     // 首先将值转为数组
@@ -173,7 +180,8 @@ function handleExceed() {
 // 上传成功回调
 function handleUploadSuccess(res, file) {
   if (res.code === 200) {
-    uploadList.value.push({ name: res.fileName, url: res.fileName })
+    const uploadUrl = resolveResourceUrl(res.fileName || res.url)
+    uploadList.value.push({ name: uploadUrl, url: uploadUrl })
     uploadedSuccessfully()
   } else {
     number.value--
@@ -206,8 +214,10 @@ function uploadedSuccessfully() {
 }
 
 // 上传失败
-function handleUploadError() {
-  proxy.$modal.msgError("上传图片失败")
+function handleUploadError(err) {
+  const response = err?.response
+  const message = response?.data?.msg || response?.data?.detail || err?.message || "上传图片失败"
+  proxy.$modal.msgError(message)
   proxy.$modal.closeLoading()
 }
 
@@ -223,7 +233,8 @@ function listToString(list, separator) {
   separator = separator || ","
   for (let i in list) {
     if (undefined !== list[i].url && list[i].url.indexOf("blob:") !== 0) {
-      strs += list[i].url.replace(baseUrl, "") + separator
+      const url = isExternal(list[i].url) ? list[i].url : list[i].url.replace(baseUrl, "")
+      strs += url + separator
     }
   }
   return strs != "" ? strs.substr(0, strs.length - 1) : ""

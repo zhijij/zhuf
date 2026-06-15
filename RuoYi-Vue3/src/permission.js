@@ -24,7 +24,7 @@ const getHomeByRoles = (roles = []) => {
   return '/portal/index'
 }
 const isPortalRoute = (path = '') => path.startsWith('/portal')
-const businessSafeRoutes = ['/portal/index', '/portal/auditor', '/login', '/register', '/401', '/404', '/lock']
+const businessSafeRoutes = ['/portal/index', '/portal/auditor', '/portal/chat', '/login', '/register', '/401', '/404', '/lock']
 const shouldRedirectBusinessUser = (roles = [], path = '') => {
   if (!roles.length || roles.includes('admin')) {
     return false

@@ -63,6 +63,7 @@ import "vue-cropper/dist/index.css"
 import { VueCropper } from "vue-cropper"
 import { uploadAvatar } from "@/api/system/user"
 import useUserStore from "@/store/modules/user"
+import { isExternal } from "@/utils/validate"
 
 const userStore = useUserStore()
 const { proxy } = getCurrentInstance()
@@ -133,7 +134,7 @@ function uploadImg() {
     formData.append("avatarfile", data, options.filename)
     uploadAvatar(formData).then(response => {
       open.value = false
-      options.img = import.meta.env.VITE_APP_BASE_API + response.imgUrl
+      options.img = resolveAvatarUrl(response.imgUrl)
       userStore.avatar = options.img
       proxy.$modal.msgSuccess("修改成功")
       visible.value = false
@@ -144,6 +145,13 @@ function uploadImg() {
 /** 实时预览 */
 function realTime(data) {
   options.previews = data
+}
+
+function resolveAvatarUrl(url) {
+  if (!url) {
+    return ""
+  }
+  return isExternal(url) ? url : import.meta.env.VITE_APP_BASE_API + url
 }
 
 /** 关闭窗口 */

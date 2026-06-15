@@ -149,16 +149,20 @@ function goAiOps() {
 .home-dashboard {
   min-height: calc(100vh - 84px);
   padding: 24px;
-  color: #172033;
-  background: #f5f7f8;
+  color: var(--sr-text);
+  background:
+    radial-gradient(circle at 18% 12%, rgba(26, 115, 232, 0.12), transparent 28%),
+    radial-gradient(circle at 84% 18%, rgba(147, 52, 230, 0.1), transparent 30%),
+    #f8fafd;
 }
 
 .overview,
 .panel,
 .metric-card {
-  background: #fff;
-  border: 1px solid #dfe5ea;
-  border-radius: 8px;
+  background: var(--sr-surface);
+  border: 1px solid var(--sr-line);
+  border-radius: 28px;
+  box-shadow: 0 18px 54px rgba(60, 64, 67, 0.08);
 }
 
 .overview {
@@ -172,7 +176,7 @@ function goAiOps() {
 .eyebrow,
 .panel-head p {
   margin: 0 0 8px;
-  color: #667085;
+  color: var(--sr-muted);
   font-size: 13px;
 }
 
@@ -184,13 +188,16 @@ function goAiOps() {
 }
 
 .overview h1 {
+  color: transparent;
+  background: linear-gradient(90deg, #1a73e8, #9334e6 54%, #007b83);
+  background-clip: text;
   font-size: 30px;
 }
 
 .summary {
   max-width: 760px;
   margin: 14px 0 0;
-  color: #4b5563;
+  color: var(--sr-muted);
   line-height: 1.7;
 }
 
@@ -213,14 +220,14 @@ function goAiOps() {
 }
 
 .metric-card span {
-  color: #667085;
+  color: var(--sr-muted);
   font-size: 13px;
 }
 
 .metric-card strong {
   display: block;
   margin: 8px 0;
-  color: #2563eb;
+  color: var(--sr-primary);
   font-size: 26px;
 }
 
@@ -228,7 +235,7 @@ function goAiOps() {
 .flow p,
 .role-list p {
   margin: 0;
-  color: #667085;
+  color: var(--sr-muted);
   line-height: 1.55;
 }
 
@@ -270,13 +277,13 @@ function goAiOps() {
 .release-grid div,
 .role-list li {
   padding: 14px;
-  background: #f8fafb;
-  border: 1px solid #e4e9ee;
-  border-radius: 8px;
+  background: #f8fafd;
+  border: 1px solid var(--sr-line);
+  border-radius: 20px;
 }
 
 .flow span {
-  color: #b45309;
+  color: var(--sr-warning);
   font-size: 12px;
   font-weight: 700;
 }
@@ -285,7 +292,7 @@ function goAiOps() {
 .role-list span {
   display: block;
   margin: 8px 0;
-  color: #172033;
+  color: var(--sr-text-strong);
 }
 
 .role-list {
@@ -304,9 +311,9 @@ function goAiOps() {
 
 .capability-list span {
   padding: 9px 12px;
-  color: #1e3a5f;
-  background: #f0f6ff;
-  border: 1px solid #c8daf5;
+  color: var(--sr-primary);
+  background: #e8f0fe;
+  border: 1px solid rgba(11, 87, 208, 0.16);
   border-radius: 999px;
   font-size: 13px;
 }
@@ -315,11 +322,11 @@ function goAiOps() {
   display: flex;
   align-items: center;
   gap: 10px;
-  color: #344054;
+  color: var(--sr-text);
 }
 
 .release-grid .el-icon {
-  color: #2563eb;
+  color: var(--sr-primary);
 }
 
 @media (max-width: 1180px) {

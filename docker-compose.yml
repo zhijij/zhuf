@@ -85,6 +85,9 @@ services:
       MCP_SERVERS_JSON: ${MCP_SERVERS_JSON:-}
       MEMORY_TTL_SECONDS: ${MEMORY_TTL_SECONDS:-86400}
       MEMORY_WINDOW_SIZE: ${MEMORY_WINDOW_SIZE:-12}
+      LANGGRAPH_CHECKPOINT_BACKEND: ${LANGGRAPH_CHECKPOINT_BACKEND:-redis}
+      LANGGRAPH_CHECKPOINT_REDIS_KEY: ${LANGGRAPH_CHECKPOINT_REDIS_KEY:-langgraph:tenant_agent:checkpoints}
+      LANGGRAPH_CHECKPOINT_TTL_SECONDS: ${LANGGRAPH_CHECKPOINT_TTL_SECONDS:-604800}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-2972515097Fzh/}
@@ -103,6 +106,8 @@ services:
     ports:
       - "8000:8000"
     depends_on:
+      redis:
+        condition: service_healthy
       vector-db:
         condition: service_healthy
     healthcheck:
@@ -114,6 +119,8 @@ services:
   backend:
     build:
       context: ./RuoYi-Vue
+      args:
+        MAVEN_REPO_URL: ${MAVEN_REPO_URL:-https://maven.aliyun.com/repository/public}
     container_name: smart-rental-backend
     restart: unless-stopped
     environment:
@@ -125,10 +132,11 @@ services:
       STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
       TENCENT_COS_SECRET_ID: ${TENCENT_COS_SECRET_ID:-}
       TENCENT_COS_SECRET_KEY: ${TENCENT_COS_SECRET_KEY:-}
-      TENCENT_COS_REGION: ${TENCENT_COS_REGION:-ap-chengdu}
-      TENCENT_COS_BUCKET: ${TENCENT_COS_BUCKET:-document-1419823100}
+      TENCENT_COS_REGION: ${TENCENT_COS_REGION:-ap-beijing}
+      TENCENT_COS_BUCKET: ${TENCENT_COS_BUCKET:-homeimage-1419823100}
       TENCENT_COS_PRESIGNED_EXPIRATION_SECONDS: ${TENCENT_COS_PRESIGNED_EXPIRATION_SECONDS:-43200}
       AI_INTERNAL_TOOL_TOKEN: ${AI_INTERNAL_TOOL_TOKEN:-smart-rental-ai-internal}
+      AMAP_API_KEY: ${AMAP_API_KEY:-}
       TZ: Asia/Shanghai
     ports:
       - "8080:8080"
@@ -151,6 +159,9 @@ services:
   frontend:
     build:
       context: ./RuoYi-Vue3
+      args:
+        VITE_AMAP_JS_API_KEY: ${VITE_AMAP_JS_API_KEY:-}
+        VITE_AMAP_SECURITY_JS_CODE: ${VITE_AMAP_SECURITY_JS_CODE:-}
     container_name: smart-rental-frontend
     restart: unless-stopped
     ports:

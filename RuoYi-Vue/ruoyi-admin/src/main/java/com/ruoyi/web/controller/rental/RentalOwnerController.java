@@ -1,6 +1,8 @@
 package com.ruoyi.web.controller.rental;
 
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -8,6 +10,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.core.controller.BaseController;
@@ -15,6 +18,7 @@ import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.common.utils.SecurityUtils;
+import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.system.domain.BizChatSession;
 import com.ruoyi.system.domain.RentalHouse;
 import com.ruoyi.system.domain.RentalHouseEntrust;
@@ -23,6 +27,7 @@ import com.ruoyi.system.enums.RentalOperationMode;
 import com.ruoyi.system.service.IBizChatService;
 import com.ruoyi.system.service.IRentalHouseEntrustService;
 import com.ruoyi.system.service.IRentalHouseService;
+import com.ruoyi.web.service.RentalAmapService;
 
 /**
  * Owner-side rental business APIs.
@@ -39,6 +44,9 @@ public class RentalOwnerController extends BaseController
 
     @Autowired
     private IBizChatService bizChatService;
+
+    @Autowired
+    private RentalAmapService rentalAmapService;
 
     @PreAuthorize("@ss.hasAnyExactRoles('owner')")
     @GetMapping("/houses")
@@ -62,8 +70,18 @@ public class RentalOwnerController extends BaseController
     @PostMapping("/houses")
     public AjaxResult createHouse(@RequestBody RentalHouse rentalHouse)
     {
+        fillHouseCoordinate(rentalHouse);
+        requireHouseCoordinate(rentalHouse);
         rentalHouseService.submitRentalHouse(rentalHouse, SecurityUtils.getUserId(), SecurityUtils.getUsername());
         return AjaxResult.success("房源已提交，等待管理员审核", rentalHouse);
+    }
+
+    @PreAuthorize("@ss.hasAnyExactRoles('owner')")
+    @GetMapping("/houses/geocode")
+    public AjaxResult geocodeHouse(@RequestParam String address,
+            @RequestParam(required = false) String city)
+    {
+        return AjaxResult.success(rentalAmapService.geocode(address, city));
     }
 
     @PreAuthorize("@ss.hasAnyExactRoles('owner')")
@@ -172,6 +190,63 @@ public class RentalOwnerController extends BaseController
             throw new ServiceException("只能由户主处理该委托关系");
         }
         return entrust;
+    }
+
+    private void fillHouseCoordinate(RentalHouse rentalHouse)
+    {
+        if (rentalHouse == null || (rentalHouse.getLongitude() != null && rentalHouse.getLatitude() != null))
+        {
+            return;
+        }
+        String address = join(rentalHouse.getCity(), rentalHouse.getDistrict(), rentalHouse.getAddress());
+        if (StringUtils.isEmpty(address))
+        {
+            return;
+        }
+        Map<String, Object> location = rentalAmapService.geocode(address, rentalHouse.getCity());
+        if (!Boolean.TRUE.equals(location.get("success")))
+        {
+            return;
+        }
+        rentalHouse.setLongitude(decimal(location.get("longitude")));
+        rentalHouse.setLatitude(decimal(location.get("latitude")));
+    }
+
+    private void requireHouseCoordinate(RentalHouse rentalHouse)
+    {
+        if (rentalHouse == null || rentalHouse.getLongitude() == null || rentalHouse.getLatitude() == null)
+        {
+            throw new ServiceException("请先在地图中确认房源位置");
+        }
+    }
+
+    private BigDecimal decimal(Object value)
+    {
+        if (value == null || StringUtils.isEmpty(String.valueOf(value)))
+        {
+            return null;
+        }
+        try
+        {
+            return new BigDecimal(String.valueOf(value));
+        }
+        catch (NumberFormatException e)
+        {
+            return null;
+        }
+    }
+
+    private String join(String... values)
+    {
+        StringBuilder builder = new StringBuilder();
+        for (String value : values)
+        {
+            if (StringUtils.isNotEmpty(value) && !builder.toString().contains(value))
+            {
+                builder.append(value);
+            }
+        }
+        return builder.toString();
     }
 
 }

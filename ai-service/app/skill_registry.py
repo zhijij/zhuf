@@ -23,6 +23,7 @@ INTENT_SKILL_MAP = {
     "listing_copy": "owner_listing",
     "knowledge_answer": "policy_faq",
     "index_advice": "enterprise_knowledge",
+    "chat_assist": "chat_summary",
     "record_summary": "chat_summary",
 }
 

@@ -15,6 +15,22 @@ export function getPortalHouseDetail(houseId) {
   })
 }
 
+export function getPortalHouseMapContext(houseId, query) {
+  return request({
+    url: `/rental/portal/map/houses/${houseId}/context`,
+    method: 'get',
+    params: query
+  })
+}
+
+export function searchPortalAround(query) {
+  return request({
+    url: '/rental/portal/map/around',
+    method: 'get',
+    params: query
+  })
+}
+
 export function createPortalAppointment(data) {
   return request({
     url: '/rental/portal/appointments',

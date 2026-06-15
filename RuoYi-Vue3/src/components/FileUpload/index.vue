@@ -29,7 +29,7 @@
     <!-- 文件列表 -->
     <transition-group ref="uploadFileList" class="upload-file-list el-upload-list el-upload-list--text" name="el-fade-in-linear" tag="ul">
       <li :key="file.uid" class="el-upload-list__item ele-upload-list__item-content" v-for="(file, index) in fileList">
-        <el-link :href="`${baseUrl}${file.url}`" underline="never" target="_blank">
+        <el-link :href="resolveFileUrl(file.url)" underline="never" target="_blank">
           <span class="el-icon-document"> {{ getFileName(file.name) }} </span>
         </el-link>
         <div class="ele-upload-list__item-content-action">
@@ -42,6 +42,7 @@
 
 <script setup>
 import { getToken } from "@/utils/auth"
+import { isExternal } from "@/utils/validate"
 import Sortable from 'sortablejs'
 
 const props = defineProps({
@@ -99,6 +100,13 @@ const showTip = computed(
   () => props.isShowTip && (props.fileType || props.fileSize)
 )
 
+function resolveFileUrl(url) {
+  if (!url) {
+    return ""
+  }
+  return isExternal(url) ? url : baseUrl + url
+}
+
 watch(() => props.modelValue, val => {
   if (val) {
     let temp = 1
@@ -155,7 +163,9 @@ function handleExceed() {
 
 // 上传失败
 function handleUploadError(err) {
-  proxy.$modal.msgError("上传文件失败")
+  const response = err?.response
+  const message = response?.data?.msg || response?.data?.detail || err?.message || "上传文件失败"
+  proxy.$modal.msgError(message)
   proxy.$modal.closeLoading()
 }
 

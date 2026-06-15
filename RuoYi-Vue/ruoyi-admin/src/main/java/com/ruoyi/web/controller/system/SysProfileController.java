@@ -20,11 +20,12 @@ import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.common.utils.DateUtils;
 import com.ruoyi.common.utils.SecurityUtils;
 import com.ruoyi.common.utils.StringUtils;
-import com.ruoyi.common.utils.file.FileUploadUtils;
 import com.ruoyi.common.utils.file.FileUtils;
 import com.ruoyi.common.utils.file.MimeTypeUtils;
 import com.ruoyi.framework.web.service.TokenService;
 import com.ruoyi.system.service.ISysUserService;
+import com.ruoyi.web.service.storage.ObjectStorageService;
+import com.ruoyi.web.service.storage.StoredObject;
 
 /**
  * 个人信息 业务处理
@@ -40,6 +41,9 @@ public class SysProfileController extends BaseController
 
     @Autowired
     private TokenService tokenService;
+
+    @Autowired
+    private ObjectStorageService objectStorageService;
 
     /**
      * 个人信息
@@ -128,11 +132,13 @@ public class SysProfileController extends BaseController
         if (!file.isEmpty())
         {
             LoginUser loginUser = getLoginUser();
-            String avatar = FileUploadUtils.upload(RuoYiConfig.getAvatarPath(), file, MimeTypeUtils.IMAGE_EXTENSION, true);
+            StoredObject object = objectStorageService.upload(RuoYiConfig.getAvatarPath(), file,
+                    MimeTypeUtils.IMAGE_EXTENSION, true);
+            String avatar = object.getFileName();
             if (userService.updateUserAvatar(loginUser.getUserId(), avatar))
             {
                 String oldAvatar = loginUser.getUser().getAvatar();
-                if (StringUtils.isNotEmpty(oldAvatar))
+                if (StringUtils.isNotEmpty(oldAvatar) && oldAvatar.startsWith("/profile/"))
                 {
                     FileUtils.deleteFile(RuoYiConfig.getProfile() + FileUtils.stripPrefix(oldAvatar));
                 }

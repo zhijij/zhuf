@@ -31,6 +31,8 @@
         <jwt.version>0.9.1</jwt.version>
         <jaxb-api.version>2.3.1</jaxb-api.version>
         <springdoc.version>3.0.2</springdoc.version>
+        <tencent.cos.version>5.6.269</tencent.cos.version>
+        <maven.repository.url>https://maven.aliyun.com/repository/public</maven.repository.url>
     </properties>
 
     <!-- 依赖声明 -->
@@ -91,6 +93,12 @@
                 <groupId>org.springdoc</groupId>
                 <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
                 <version>${springdoc.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.qcloud</groupId>
+                <artifactId>cos_api</artifactId>
+                <version>${tencent.cos.version}</version>
             </dependency>
 
             <!-- io常用工具类 -->
@@ -208,7 +216,7 @@
         <repository>
             <id>public</id>
             <name>aliyun nexus</name>
-            <url>https://maven.aliyun.com/repository/public</url>
+            <url>${maven.repository.url}</url>
             <releases>
                 <enabled>true</enabled>
             </releases>
@@ -219,7 +227,7 @@
         <pluginRepository>
             <id>public</id>
             <name>aliyun nexus</name>
-            <url>https://maven.aliyun.com/repository/public</url>
+            <url>${maven.repository.url}</url>
             <releases>
                 <enabled>true</enabled>
             </releases>

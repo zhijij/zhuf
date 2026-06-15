@@ -48,7 +48,7 @@ const getLogoTextColor = computed(() => {
   if (settingsStore.navType == 3) {
     return variables.menuLightText
   }
-  return sideTheme.value === 'theme-dark' ? '#fff' : variables.menuLightText
+  return sideTheme.value === 'theme-dark' ? variables.menuText : variables.menuLightText
 })
 </script>
 

@@ -43,12 +43,14 @@ export function normalizeAiResponse(response) {
   if (typeof data === 'string') {
     return { answer: data, toolCalls: [], suggestions: null }
   }
+  const experts = Array.isArray(data?.collaboration?.experts) ? data.collaboration.experts : []
+  const collaboration = experts.length ? data?.collaboration || null : null
   return {
     answer: data?.answer || data?.msg || '智能体接口已收到请求。',
     intent: data?.intent || '',
     intentLabel: data?.intentLabel || '',
     toolCalls: data?.toolCalls || [],
-    collaboration: data?.collaboration || null,
+    collaboration,
     suggestions: data?.suggestions || null,
     nextActions: data?.nextActions || []
   }

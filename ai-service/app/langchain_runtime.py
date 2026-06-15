@@ -84,6 +84,45 @@ def refine_with_langchain(
     return str(content).strip() if content else None
 
 
+def invoke_structured_json(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    messages: list[tuple[str, str]],
+    timeout: int = 8,
+) -> dict[str, Any] | None:
+    if not langchain_available():
+        return None
+
+    llm = ChatOpenAI(
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        temperature=0,
+        timeout=timeout,
+    )
+    response = llm.invoke(messages)
+    content = getattr(response, "content", None)
+    if isinstance(content, list):
+        content = "".join(
+            item.get("text", "") if isinstance(item, dict) else str(item)
+            for item in content
+        )
+    if not content:
+        return None
+    text = str(content).strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.startswith("json"):
+            text = text[4:].strip()
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
 def _make_tool_adapter(
     name: str,
     tool_registry: dict[str, Callable[..., dict[str, Any]]],

@@ -19,6 +19,7 @@ import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.common.utils.DateUtils;
 import com.ruoyi.common.utils.StringUtils;
+import com.ruoyi.web.service.RentalAmapService;
 import com.ruoyi.system.domain.AiToolAuditLog;
 import com.ruoyi.system.domain.AiUserMemory;
 import com.ruoyi.system.domain.RentalAppointment;
@@ -61,6 +62,9 @@ public class RentalAiToolController
 
     @Autowired
     private IRentalContractService rentalContractService;
+
+    @Autowired
+    private RentalAmapService rentalAmapService;
 
     @Autowired
     private IAiUserMemoryService aiUserMemoryService;
@@ -137,6 +141,58 @@ public class RentalAiToolController
         catch (Exception e)
         {
             audit(request, "get_house_detail", false, null, e, started);
+            return AjaxResult.error(safeError(e));
+        }
+    }
+
+    @PostMapping("/amap/house-context")
+    public AjaxResult houseMapContext(@RequestHeader(value = TOKEN_HEADER, required = false) String token,
+            @RequestBody Map<String, Object> request)
+    {
+        if (!authorized(token))
+        {
+            return AjaxResult.error("AI 工具令牌无效");
+        }
+        long started = System.currentTimeMillis();
+        try
+        {
+            Long houseId = number(request.get("houseId"));
+            Long userId = number(request.get("userId"));
+            RentalHouse house = rentalHouseService.selectRentalHouseDetail(houseId, userId, false);
+            Map<String, Object> data = rentalAmapService.buildHouseContext(house, text(request.get("destination")),
+                    defaultText(text(request.get("mode")), "transit"));
+            data.put("success", true);
+            audit(request, "amap_house_context", true, data, null, started);
+            return AjaxResult.success(data);
+        }
+        catch (Exception e)
+        {
+            audit(request, "amap_house_context", false, null, e, started);
+            return AjaxResult.error(safeError(e));
+        }
+    }
+
+    @PostMapping("/amap/around")
+    public AjaxResult amapAround(@RequestHeader(value = TOKEN_HEADER, required = false) String token,
+            @RequestBody Map<String, Object> request)
+    {
+        if (!authorized(token))
+        {
+            return AjaxResult.error("AI 工具令牌无效");
+        }
+        long started = System.currentTimeMillis();
+        try
+        {
+            Map<String, Object> data = rentalAmapService.searchAround(text(request.get("location")),
+                    text(request.get("keywords")), text(request.get("city")),
+                    integer(request.get("radius")), integer(request.get("limit")));
+            data.put("success", true);
+            audit(request, "amap_around", true, data, null, started);
+            return AjaxResult.success(data);
+        }
+        catch (Exception e)
+        {
+            audit(request, "amap_around", false, null, e, started);
             return AjaxResult.error(safeError(e));
         }
     }
@@ -467,6 +523,19 @@ public class RentalAiToolController
     {
         BigDecimal parsed = decimal(value);
         return parsed == null ? fallback : parsed;
+    }
+
+    private Integer integer(Object value)
+    {
+        if (value == null || StringUtils.isEmpty(String.valueOf(value)))
+        {
+            return null;
+        }
+        if (value instanceof Number)
+        {
+            return ((Number) value).intValue();
+        }
+        return Integer.valueOf(String.valueOf(value));
     }
 
     private Date date(Object value)

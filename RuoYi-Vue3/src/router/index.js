@@ -61,6 +61,13 @@ export const constantRoutes = [
     meta: { title: '审核工作台' }
   },
   {
+    path: '/portal/chat',
+    component: () => import('@/views/portal/chat.vue'),
+    name: 'PortalChat',
+    hidden: true,
+    meta: { title: '消息中心' }
+  },
+  {
     path: '/lock',
     component: () => import('@/views/lock'),
     hidden: true,

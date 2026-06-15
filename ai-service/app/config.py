@@ -25,13 +25,16 @@ ROLE_LABELS = {
 }
 
 INTENT_LABELS = {
+    "smalltalk": "寒暄",
     "house_recommend": "房源推荐",
+    "correction": "纠偏确认",
     "transaction_draft": "事务表单建议",
     "record_summary": "业务摘要",
     "compliance_review": "房源合规审查",
     "contract_risk": "合同风险审阅",
     "listing_copy": "房源文案",
     "followup_message": "沟通跟进",
+    "chat_assist": "会话协同",
     "index_advice": "索引与知识库",
     "knowledge_answer": "知识库问答",
     "context_answer": "业务问答",

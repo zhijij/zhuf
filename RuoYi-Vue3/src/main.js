@@ -1,4 +1,4 @@
-import { createApp } from 'vue'
+import { createApp, defineAsyncComponent } from 'vue'
 
 import Cookies from 'js-cookie'
 
@@ -34,7 +34,6 @@ import Pagination from '@/components/Pagination'
 // 自定义表格工具组件
 import RightToolbar from '@/components/RightToolbar'
 // 富文本组件
-import Editor from "@/components/Editor"
 // 文件上传组件
 import FileUpload from "@/components/FileUpload"
 // 图片上传组件
@@ -45,6 +44,7 @@ import ImagePreview from "@/components/ImagePreview"
 import DictTag from '@/components/DictTag'
 
 const app = createApp(App)
+const Editor = defineAsyncComponent(() => import('@/components/Editor'))
 
 // 全局方法挂载
 app.config.globalProperties.useDict = useDict
