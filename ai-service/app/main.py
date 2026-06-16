@@ -449,6 +449,9 @@ def detect_intent(message: str, state: dict[str, Any]) -> str:
     if context.get("pageMode") == "chat" or context.get("chat"):
         return "chat_assist"
 
+    if state.get("transactionType"):
+        return "transaction_draft"
+
     llm_intent = detect_intent_with_llm(message, state)
     if llm_intent:
         return llm_intent
@@ -610,7 +613,7 @@ def plan_agent_tools_with_llm(intent: str, state: dict[str, Any]) -> dict[str, A
     except Exception:
         return None
 
-    tools = planned.tools or default_plan
+    tools = merge_tool_plan(default_plan, planned.tools)
     if intent == "chat_assist" and "summarize_chat_context" not in tools:
         tools = ["summarize_chat_context", *tools]
     return {
@@ -621,6 +624,14 @@ def plan_agent_tools_with_llm(intent: str, state: dict[str, Any]) -> dict[str, A
         "reason": planned.reason,
         "mode": "llm",
     }
+
+
+def merge_tool_plan(required: list[str], planned: list[str]) -> list[str]:
+    merged: list[str] = []
+    for name in [*required, *planned]:
+        if name and name not in merged:
+            merged.append(name)
+    return merged
 
 
 def build_agent_tool_plan(intent: str, state: dict[str, Any]) -> dict[str, Any]:

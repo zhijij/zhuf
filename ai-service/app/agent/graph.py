@@ -178,6 +178,10 @@ def structured_route(state: TenantAgentState) -> dict[str, Any]:
     message = state["message"]
     slots = infer_route_slots(state)
     text = message.lower()
+    if is_record_summary_query(text):
+        return TenantRoute(intent="context_answer", route="retrieval_executor", slots=slots, confidence=0.86).model_dump()
+    if is_contract_knowledge_query(text, slots):
+        return TenantRoute(intent="knowledge_answer", route="retrieval_executor", slots=slots, confidence=0.84).model_dump()
     if not message.strip():
         route = TenantRoute(intent="smalltalk", route="smalltalk", slots=slots, confidence=0.8)
     elif any(word in text for word in ["你好", "在吗", "谢谢"]):
@@ -214,6 +218,23 @@ def normalize_route(route: dict[str, Any], state: TenantAgentState) -> dict[str,
     route_name = str(route.get("route") or "collaboration")
     missing_slots = list(route.get("missing_slots") or [])
     confidence = float(route.get("confidence") or 0.75)
+
+    if is_record_summary_query(text):
+        return TenantRoute(
+            intent="context_answer",
+            route="retrieval_executor",
+            slots=slots,
+            missing_slots=[],
+            confidence=confidence,
+        ).model_dump()
+    if is_contract_knowledge_query(text, slots):
+        return TenantRoute(
+            intent="knowledge_answer",
+            route="retrieval_executor",
+            slots=slots,
+            missing_slots=[],
+            confidence=confidence,
+        ).model_dump()
 
     if any(word in text for word in ["不对", "不对吧", "不太对", "不准确", "不是这个", "你理解错了", "重新来", "重说", "纠正一下", "不用"]):
         intent = "correction"
@@ -296,6 +317,20 @@ def is_nearby_query(text: str) -> bool:
         "周围", "周边", "附近", "旁边", "学校", "学区", "幼儿园", "小学", "中学",
         "医院", "地铁", "公交", "商超", "超市", "配套", "通勤",
     ])
+
+
+def is_record_summary_query(text: str) -> bool:
+    return any(word in text for word in [
+        "总结", "摘要", "当前业务", "业务进度", "进度", "梳理", "当前记录",
+    ])
+
+
+def is_contract_knowledge_query(text: str, slots: dict[str, Any]) -> bool:
+    if slots.get("contractId"):
+        return False
+    has_contract_topic = any(word in text for word in ["押金", "合同", "签约", "违约", "退还", "条款"])
+    asks_rule = any(word in text for word in ["规则", "是什么", "怎么", "如何", "怎么办", "说明", "解释"])
+    return has_contract_topic and asks_rule
 
 
 def nearby_focus(message: str) -> str | None:
@@ -584,6 +619,17 @@ def retrieval_executor(state: TenantAgentState) -> TenantAgentState:
     state["checkpoints"].append("retrieval_executor")
     state = ensure_rag_loaded(state)
     state["retrieval"] = state.get("rag") or {}
+    if should_append_rag_tool_call(state):
+        state["tool_calls"] = [
+            *state.get("tool_calls", []),
+            tool_call("search_knowledge_base", "检索统一知识库", rag_tool_output(state)),
+        ]
+    if (state.get("route") or {}).get("intent") == "context_answer":
+        record = selected_record_tool_output(state)
+        state["tool_calls"] = [
+            *state.get("tool_calls", []),
+            tool_call("summarize_business_record", "读取当前业务", record),
+        ]
     return state
 
 
@@ -593,6 +639,44 @@ def analyst(state: TenantAgentState) -> TenantAgentState:
     lines = [knowledge_match_line(item) for item in hits[:4]]
     state["analysis"] = {"summary": "\n".join(lines) if lines else "未检索到强相关知识。"}
     return state
+
+
+def should_append_rag_tool_call(state: TenantAgentState) -> bool:
+    intent = (state.get("route") or {}).get("intent")
+    return intent in {"knowledge_answer", "context_answer"}
+
+
+def rag_tool_output(state: TenantAgentState) -> dict[str, Any]:
+    rag = state.get("retrieval") or state.get("rag") or {}
+    hits = rag.get("hits") or []
+    return {
+        "summary": "未命中统一知识库内容。" if not hits else "命中知识库：" + "、".join(str(item.get("title") or item.get("sourceId") or "未命名知识") for item in hits[:4]),
+        "matches": hits[:6],
+        "appliedSourceTypes": rag.get("sourceTypes") or [],
+        "source": rag.get("source"),
+    }
+
+
+def selected_record_tool_output(state: TenantAgentState) -> dict[str, Any]:
+    selected = (state.get("context") or {}).get("selected") or {}
+    if not selected:
+        return {"summary": "当前未选中业务记录。", "record": {}}
+    parts = []
+    for label, key in [
+        ("标题", "title"),
+        ("城市", "city"),
+        ("区域", "district"),
+        ("租金", "rentAmount"),
+        ("面积", "area"),
+        ("房源ID", "houseId"),
+        ("合同ID", "contractId"),
+        ("状态", "statusLabel"),
+    ]:
+        value = selected.get(key)
+        if value not in (None, ""):
+            parts.append(f"{label}：{value}")
+    summary = "；".join(parts) if parts else "当前记录字段较少，需要补充业务信息。"
+    return {"summary": summary, "record": selected}
 
 
 def house_search_specialist(state: TenantAgentState) -> dict[str, Any]:
@@ -830,7 +914,9 @@ def synthesis(state: TenantAgentState) -> TenantAgentState:
     state["checkpoints"].append("synthesis")
     route = state.get("route") or {}
     intent = route.get("intent") or "context_answer"
-    if intent == "smalltalk":
+    if intent == "knowledge_answer":
+        answer = synthesize_knowledge_answer(state)
+    elif intent == "smalltalk":
         answer = (state.get("analysis") or {}).get("summary")
     elif intent == "correction":
         answer = (state.get("analysis") or {}).get("summary") or "我收到纠正了，你可以直接补充正确目标。"
@@ -910,10 +996,30 @@ def synthesize_contract_risk(state: TenantAgentState) -> str:
     return "这次先看合同风险，建议重点确认：\n" + "\n".join(f"- {item}" for item in risks[:5])
 
 
+def synthesize_knowledge_answer(state: TenantAgentState) -> str:
+    knowledge = first_tool_output(state, "search_knowledge_base")
+    matches = knowledge.get("matches") or []
+    if matches:
+        lines = ["我查了统一知识库，可以参考这些内容："]
+        lines.extend(knowledge_match_line(item) for item in matches[:4])
+        return "\n".join(lines)
+    analysis = (state.get("analysis") or {}).get("summary")
+    question = str(state.get("message") or "").strip()
+    if question:
+        return f"我查了统一知识库，暂时没有查到与“{question}”相关的可用内容；不能凭空给押金、退还或合同规则。"
+    if analysis:
+        return "我查了统一知识库：\n" + analysis
+    return "统一知识库里暂时没有查到可用内容。"
+
+
 def synthesize_context_answer(state: TenantAgentState) -> str:
     nearby = synthesize_nearby_answer(state) if is_nearby_query(str(state.get("message") or "").lower()) else ""
     if nearby:
         return nearby
+    record = first_tool_output(state, "summarize_business_record")
+    if record:
+        summary = record.get("summary") or "当前记录字段较少，需要补充业务信息。"
+        return "当前业务摘要：\n" + summary
     summaries = [
         item.get("summary")
         for item in (state.get("collaboration") or {}).get("experts", [])
@@ -933,6 +1039,13 @@ def extract_house_matches(state: TenantAgentState) -> list[dict[str, Any]]:
                 if isinstance(item, dict):
                     matches.append(item)
     return matches
+
+
+def first_tool_output(state: TenantAgentState, name: str) -> dict[str, Any]:
+    for call in state.get("tool_calls", []):
+        if call.get("name") == name:
+            return call.get("output") or {}
+    return {}
 
 
 def extract_map_evidence(state: TenantAgentState) -> dict[str, Any]:

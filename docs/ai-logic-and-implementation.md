@@ -1,55 +1,84 @@
-# AI 逻辑与实现说明
+# AI 技术与实现逻辑说明
 
-本文档说明智能 AI 房屋租赁系统中 AI 模块的业务逻辑、调用链路和核心实现。当前项目采用“Vue 前端 + RuoYi Java 后端 + Python FastAPI AI 服务”的分层设计，Java 负责登录鉴权、业务数据和事务一致性，Python 负责智能体编排、RAG 检索、工具调用、记忆和大模型兜底增强。
+本文档说明智能房屋租赁系统中 AI 模块的技术选型、调用链路、实现逻辑和后续扩展方式。当前实现以代码为准：前端只访问 Java 后端，Java 负责认证、权限、业务数据和 AI 运维入口，Python FastAPI 负责智能体编排、RAG 检索、工具规划、LangGraph 多轮状态和大模型增强。
 
 ## 1. 总体架构
 
 ```mermaid
 flowchart LR
-    U["用户<br/>租户/房东/中介/审核员"] --> V["Vue 前端<br/>AI 助手/业务工作台"]
-    V --> J["RuoYi Java 后端<br/>鉴权/权限/业务数据"]
-    J --> P["Python AI 服务<br/>FastAPI + Agent"]
-    P --> R["RAG 检索<br/>Milvus 或 pgvector"]
-    P --> T["业务工具<br/>房源/合同/地图/记忆"]
-    P --> L["LLM<br/>OpenAI 兼容接口，可选"]
-    T --> J
+    U["用户<br/>租户/户主/中介/审核员"] --> FE["Vue3 前端<br/>门户工作台 + AI 助手"]
+    FE --> BE["RuoYi Java 后端<br/>登录鉴权/角色权限/业务事务"]
+    BE --> AI["Python FastAPI AI 服务<br/>意图识别/工具规划/Agent/RAG"]
+    AI --> LLM["OpenAI-compatible LLM<br/>可选"]
+    AI --> VDB["PostgreSQL + pgvector<br/>房源/知识向量库"]
+    AI --> LG["LangGraph Checkpointer<br/>Redis 优先/MemorySaver 兜底"]
+    AI --> TOOL["Java 内部 AI 工具接口<br/>房源/合同/高德/记忆"]
+    TOOL --> BE
+    BE --> MYSQL["MySQL 业务库"]
+    BE --> AMAP["高德 Web Service"]
+    FE --> AMAPJS["高德 JS SDK<br/>户主发布房源选点"]
 ```
 
-核心原则：
+核心边界：
 
-- 前端只调用 Java，不直接调用 Python AI 服务。
-- Java 统一做用户身份、角色权限、业务数据读写和索引任务管理。
-- Python AI 服务只做智能判断、检索、内容生成和工具编排。
-- 所有写业务数据的动作必须回到 Java 工具层执行，AI 不能直接写 MySQL 业务表。
-- 大模型未配置时，系统仍可通过规则、工具和本地索引返回可用结果。
+- 前端只调用 Java，不直接访问 Python AI 服务。
+- Java 统一做登录态、角色、菜单权限、数据权限、业务事务和 AI 运维权限。
+- Python AI 服务只做智能判断、工具编排、RAG 检索、LLM 改写和多轮状态。
+- Python 需要业务数据时，必须通过 Java `/rental/ai/tools/**` 内部工具接口读取或写入。
+- 大模型和远程 embedding 未配置时，系统仍能通过规则计划、本地工具和本地哈希向量降级运行。
 
-## 2. 请求调用链路
+## 2. 关键代码位置
 
-### 2.1 前端到 Java
+| 模块 | 文件 | 职责 |
+| --- | --- | --- |
+| 前端 AI API | `RuoYi-Vue3/src/api/portal/ai.js` | 封装门户 AI 聊天、会话、推荐、索引任务接口 |
+| 前端门户 | `RuoYi-Vue3/src/views/portal/index.vue` | AI 助手、业务工具、户主房源发布、高德选点入口 |
+| 前端高德 SDK | `RuoYi-Vue3/src/utils/amap.js` | 加载高德 JS SDK，判断 `VITE_AMAP_JS_API_KEY` 是否可用 |
+| Java AI 网关 | `RuoYi-Vue/ruoyi-admin/src/main/java/com/ruoyi/web/controller/rental/RentalAiController.java` | 前端 AI 请求入口，转发 Python，管理会话和索引任务 |
+| Java AI 工具 | `RuoYi-Vue/ruoyi-admin/src/main/java/com/ruoyi/web/controller/rental/RentalAiToolController.java` | Python 调用的内部工具边界，使用 `X-AI-Tool-Token` |
+| Java 高德服务 | `RuoYi-Vue/ruoyi-admin/src/main/java/com/ruoyi/web/service/RentalAmapService.java` | 调高德周边、地理编码、路线接口 |
+| Python AI 入口 | `ai-service/app/main.py` | FastAPI 接口、意图识别、工具规划、普通 Agent 流程 |
+| 租户 LangGraph | `ai-service/app/agent/graph.py` | 租户多智能体图、路由、协作、RAG 懒加载、综合回复 |
+| Checkpointer | `ai-service/app/agent/memory/checkpoint.py` | LangGraph checkpoint，Redis 持久化优先，内存兜底 |
+| 向量库 | `ai-service/app/vector_store.py` | pgvector 建表、embedding、房源/知识入库和检索 |
+| RAG 检索器 | `ai-service/app/agent/rag/retriever.py` | Milvus 可选优先，pgvector 兜底，构造 prompt context |
+| Docker 编排 | `docker-compose.yml` | MySQL、Redis、pgvector、AI、后端、前端容器 |
 
-前端 AI 入口位于：
+## 3. 端到端请求链路
 
-- `RuoYi-Vue3/src/api/portal/ai.js`
-- `RuoYi-Vue3/src/views/portal/index.vue`
-- `RuoYi-Vue3/src/views/portal/components/FloatingAiAssistant.vue`
+以租户在门户 AI 助手中发送“预算 3000，地铁附近，帮我推荐房源”为例：
 
-主要接口：
+```mermaid
+sequenceDiagram
+    participant FE as Vue3 门户
+    participant BE as Java RentalAiController
+    participant AI as FastAPI /api/v1/agent/chat
+    participant G as Tenant LangGraph
+    participant V as pgvector/Milvus
+    participant T as Java AI Tools
+    participant L as LLM 可选
 
-```text
-POST /rental/ai/chat
-POST /rental/ai/recommend
-GET  /rental/ai/capabilities
-POST /rental/ai/index/tasks
-POST /rental/ai/index/knowledge
+    FE->>BE: POST /rental/ai/chat
+    BE->>BE: 补充 userId/username/roles/isAdmin/context
+    BE->>AI: POST /api/v1/agent/chat
+    AI->>AI: detect_intent 或 LLM 结构化意图
+    AI->>G: 租户场景进入 LangGraph
+    G->>G: router -> coordinator
+    G->>V: 需要知识时懒加载 RAG
+    G->>T: 需要业务数据时调用工具
+    G->>L: 可选，路由/计划/回复润色
+    G-->>AI: answer/toolCalls/checkpoints/nextActions
+    AI-->>BE: 标准 AI 响应
+    BE-->>FE: AjaxResult.success(data)
 ```
 
-前端发送的核心字段：
+前端发送的典型请求：
 
 ```json
 {
   "message": "预算 3000，地铁附近，帮我推荐几套房",
   "role": "tenant",
-  "sessionId": "session-id",
+  "sessionId": "user-101",
   "context": {
     "workMode": "tenant",
     "selected": {},
@@ -58,473 +87,512 @@ POST /rental/ai/index/knowledge
 }
 ```
 
-### 2.2 Java 转发到 Python
+Java 会补充当前登录用户相关字段，例如 `userId`、`username`、`roles`、`isAdmin`，避免前端伪造核心身份。
 
-Java 控制器：
+## 4. 前端实现方式
 
-```text
-RuoYi-Vue/ruoyi-admin/src/main/java/com/ruoyi/web/controller/rental/RentalAiController.java
-```
+前端 AI 接口集中在 `RuoYi-Vue3/src/api/portal/ai.js`：
 
-核心逻辑：
+| 方法 | Java 接口 | 说明 |
+| --- | --- | --- |
+| `sendPortalAiChat` | `POST /rental/ai/chat` | 普通 AI 聊天入口 |
+| `sendAiConversationMessage` | `POST /rental/ai/conversations/{id}/messages` | 带会话持久化的聊天入口 |
+| `recommendRentalHouses` | `POST /rental/ai/recommend` | 房源推荐入口 |
+| `getAiCapabilities` | `GET /rental/ai/capabilities` | 查看 AI 服务能力、向量库、LangChain、checkpointer 状态 |
+| `createAiIndexTask` | `POST /rental/ai/index/tasks` | 创建向量索引任务，admin 权限 |
+| `indexKnowledgeDocument` | `POST /rental/ai/index/knowledge` | 知识入库，admin 权限 |
+| `seedKnowledgeDocuments` | `POST /rental/ai/index/knowledge/seed` | 初始化知识库，admin 权限 |
 
-1. 接收前端请求。
-2. 通过 `SecurityUtils` 读取当前登录用户。
-3. 自动补充 `userId`、`username`、`roles`、`isAdmin`。
-4. 转发到 Python AI 服务。
-5. 将 Python 结果包装成 `AjaxResult` 返回前端。
+门户页面 `RuoYi-Vue3/src/views/portal/index.vue` 中有两类 AI 入口：
 
-示例链路：
+- 普通用户使用右下角 AI 助手和业务工具卡片。
+- 户主发布房源时，通过高德/全球地图选择经纬度，保存到房源数据，再由 AI 索引任务写入向量库。
 
-```text
-Vue
-  -> POST /rental/ai/chat
-  -> RentalAiController.chat()
-  -> enrichRequest()
-  -> Python POST /api/v1/agent/chat
-  -> 返回 answer / intent / toolCalls / houseIds / nextActions
-```
+高德前端 SDK 位于 `RuoYi-Vue3/src/utils/amap.js`，使用：
 
-### 2.3 Python AI 入口
+- `VITE_AMAP_JS_API_KEY`：浏览器端高德 JS Key。
+- `VITE_AMAP_SECURITY_JS_CODE`：开启安全密钥时使用。
 
-Python 主入口：
+注意：`VITE_*` 会进入前端构建产物，只能使用受域名限制的浏览器 Key；服务端高德 Key 使用 `AMAP_API_KEY`，不要暴露到前端。
 
-```text
-ai-service/app/main.py
-```
+## 5. Java AI 网关
+
+Java 网关入口是 `RentalAiController`，主要职责：
+
+- 校验用户登录态和角色权限。
+- 将前端请求 enrich 成 AI 可理解的上下文。
+- 转发到 Python AI 服务。
+- 管理 AI 会话、消息、上下文和摘要。
+- 管理知识库和向量索引任务。
+- 对高风险 AI 运维接口使用 admin 权限收口。
 
 主要接口：
 
+| Java 接口 | Python 目标或本地逻辑 | 权限定位 |
+| --- | --- | --- |
+| `POST /rental/ai/chat` | `/api/v1/agent/chat` | 业务角色可用 |
+| `POST /rental/ai/recommend` | `/api/v1/agent/recommend` | 业务角色可用 |
+| `GET /rental/ai/capabilities` | `/api/v1/agent/capabilities` | 业务角色可查看 |
+| `GET/POST/DELETE /rental/ai/conversations` | Java 会话服务 | 当前用户自己的会话 |
+| `POST /rental/ai/index/knowledge` | `/api/v1/index/knowledge` | admin |
+| `POST /rental/ai/index/tasks` | Java 创建任务 | admin |
+| `POST /rental/ai/index/tasks/{id}/process` | 处理向量任务 | admin |
+| `GET /rental/ai/houses/{id}/document` | 查看房源 AI 文档 | admin |
+
+权限最终原则：
+
+- `admin` 管 AI 配置、知识库、向量索引、会话审计、工具日志等 AI 运维能力。
+- `auditor` 管业务审核，例如房源审核。
+- `auditor` 不默认拥有 `system:doc:*`、`system:chunk:*`、`system:task:*`、`system:memory:*`、`system:session:*`、`system:log:*`。
+- 需要兼岗时给用户显式分配双角色，而不是把 AI 运维权限扩散给审核员。
+
+## 6. Java 内部工具边界
+
+Python AI 不直接读写 MySQL 业务表，而是调用 `RentalAiToolController`：
+
 ```text
-GET  /health
-GET  /api/v1/agent/capabilities
-POST /api/v1/agent/chat
-POST /api/v1/agent/recommend
-POST /api/v1/index/house
-POST /api/v1/index/knowledge
-POST /api/v1/index/knowledge/seed
-GET  /api/v1/mcp/manifest
+POST /rental/ai/tools/houses/search
+POST /rental/ai/tools/houses/detail
+POST /rental/ai/tools/amap/house-context
+POST /rental/ai/tools/amap/around
+POST /rental/ai/tools/contracts/detail
+POST /rental/ai/tools/memory/save
 ```
 
-`/api/v1/agent/chat` 的处理步骤：
+安全方式：
 
-1. `build_agent_state()` 组装状态。
-2. `detect_intent()` 识别用户意图。
-3. `select_skill()` 选择业务 Skill。
-4. 租户找房类请求进入 LangGraph 智能体。
-5. 非租户或非图模式请求执行本地工具计划。
-6. `render_agent_answer()` 生成规则答案。
-7. 如配置大模型，则 `refine_with_llm_if_configured()` 优化回答。
-8. `update_memory()` 写入短期会话记忆。
-9. 返回结构化响应。
+- 请求头使用 `X-AI-Tool-Token`。
+- Java 配置项为 `ai.service.internal-token`，Docker 中通过 `AI_INTERNAL_TOOL_TOKEN` 注入。
+- 工具调用写入 `AiToolAuditLog`，便于后续追踪 AI 调用了什么、是否成功、耗时多少。
 
-## 3. 意图识别逻辑
+这样设计的原因：
 
-AI 先判断用户这句话属于什么业务意图。当前支持的主要意图：
+- 业务数据仍由 Java 服务层控制，复用已有数据权限和业务规则。
+- Python 智能体只拿“可给 AI 使用”的结构化结果。
+- 高风险写操作可以在 Java 层继续加审批、幂等、审计和角色判断。
 
-| 意图 | 说明 |
+## 7. Python AI 服务接口
+
+Python 入口在 `ai-service/app/main.py`。
+
+| 接口 | 说明 |
 | --- | --- |
-| `house_recommend` | 找房、推荐房源、预算筛选、地铁通勤 |
-| `contract_risk` | 合同、押金、违约、签约风险 |
-| `compliance_review` | 房源审核、违规、虚假房源、发布风险 |
-| `listing_copy` | 房源标题、卖点、描述文案 |
-| `followup_message` | 跟进话术、沟通回复 |
-| `knowledge_answer` | 政策、FAQ、平台规则、流程 |
-| `transaction_draft` | 业务弹窗表单辅助填写 |
-| `record_summary` | 当前业务记录摘要 |
-| `index_advice` | AI 索引、知识库、向量状态 |
-| `smalltalk` | 问候、普通闲聊 |
-| `correction` | 用户纠正上一轮理解 |
-| `context_answer` | 兜底上下文问答 |
+| `GET /health` | 健康检查 |
+| `GET /api/v1/agent/capabilities` | 返回 AI 能力、向量库状态、embedding 模式、checkpointer 状态 |
+| `POST /api/v1/agent/chat` | 主聊天入口 |
+| `POST /api/v1/agent/recommend` | 推荐入口 |
+| `POST /api/v1/index/house` | 房源文档入向量库 |
+| `POST /api/v1/index/knowledge` | 知识文档入向量库 |
+| `POST /api/v1/index/knowledge/seed` | 初始化知识库 |
+| `GET /api/v1/mcp/manifest` | MCP 工具/资源清单 |
 
-意图识别有两层：
+`/api/v1/agent/capabilities` 是排障最重要的接口，重点看：
 
-- 如果配置了 `AI_LLM_BASE_URL`、`AI_LLM_API_KEY`、`AI_LLM_MODEL`，优先让大模型输出结构化 JSON 意图。
-- 如果没有配置大模型，则使用关键词规则识别，例如“预算、地铁、找房”进入 `house_recommend`，“合同、押金、违约”进入 `contract_risk`。
+- `vectorDbReady`：pgvector 是否可用。
+- `embeddingMode`：`remote` 或 `local-hash`。
+- `embeddingModel`：远程模型名或 `local-hash`。
+- `checkpointer`：LangGraph checkpoint 是否持久化。
+- `langchain.available`：LangChain 能否使用。
+- `tools`：当前注册的工具清单。
+- `multiAgentModes`：租户图和聊天业务智能体状态。
 
-## 4. 租户 LangGraph 智能体逻辑
+## 8. 意图识别和工具规划
 
-租户找房类请求会优先进入：
+主入口 `chat()` 的逻辑是：
 
-```text
-ai-service/app/agent/graph.py
-```
+1. `build_agent_state()` 整理 message、role、context、selected、filters、memory。
+2. `detect_intent()` 判断意图。
+3. 如果是 `chat_assist`，进入业务聊天智能体。
+4. 如果是租户找房/问房源/合同风险等场景，进入租户 LangGraph。
+5. 否则执行普通工具规划 `run_agent_tools()`。
+6. `render_agent_answer()` 汇总工具结果。
+7. `refine_with_llm_if_configured()` 在配置 LLM 时做最终润色。
+8. `update_memory()` 写入短期记忆。
 
-图流程：
+意图识别方式：
+
+- 配置了 `AI_LLM_BASE_URL`、`AI_LLM_API_KEY`、`AI_LLM_MODEL` 时，优先让模型输出结构化 JSON 意图。
+- 未配置或调用失败时，走关键词和上下文规则兜底。
+
+工具规划方式：
+
+- `plan_agent_tools_with_llm()` 让模型先输出 tool plan。
+- 模型 plan 只允许选择注册过的工具，避免幻觉工具名。
+- `merge_tool_plan()` 会把必要默认工具和模型计划合并。
+- 如果模型不可用，`default_tool_plan()` 兜底。
+- 最终计划写入 `state["agentPlan"]`，返回给前端和排障使用。
+
+这就是当前“模型自主理解 -> 动态规划分支”的实现：不是完全靠前端按钮或硬编码 if/else，而是 LLM 先决定工具计划，系统再用白名单、默认计划和规则兜底保证稳定性。
+
+## 9. 租户 LangGraph 流程
+
+租户智能体位于 `ai-service/app/agent/graph.py`。当前图结构：
 
 ```mermaid
 flowchart TD
-    A["rag_prefetch<br/>初始化 RAG 状态"] --> B["router<br/>识别 intent/route/slots"]
-    B --> C["coordinator<br/>主管制定工具与专家计划"]
-    C --> D{"路由"}
-    D --> E["smalltalk<br/>闲聊/纠正"]
-    D --> F["slot_filling<br/>补充城市/预算等槽位"]
-    D --> G["retrieval_executor<br/>知识库检索"]
-    D --> H["collaboration<br/>并行专家协作"]
-    G --> I["analyst<br/>整理检索结论"]
-    E --> J["synthesis<br/>统一生成最终回复"]
+    A["rag_prefetch<br/>初始化为 deferred"] --> B["router<br/>意图/槽位/route"]
+    B --> C["coordinator<br/>专家和工具计划"]
+    C --> D{"route_after_coordinator"}
+    D --> E["smalltalk<br/>寒暄/纠偏"]
+    D --> F["slot_filling<br/>补城市/预算/房源等槽位"]
+    D --> G["collaboration<br/>多专家协作"]
+    D --> H["retrieval_executor<br/>检索执行"]
+    D --> I["llm_unconfigured<br/>降级说明"]
+    G --> J["synthesis<br/>综合回复"]
+    H --> K["analyst<br/>分析检索和工具结果"]
+    K --> J
+    E --> J
     F --> J
-    H --> J
     I --> J
-    J --> K["persist_memory<br/>保存短期和长期记忆"]
+    J --> L["persist_memory<br/>保存长期记忆"]
 ```
 
-### 4.1 Router
+关键点：
 
-Router 输出：
+- `rag_prefetch` 现在不立即检索，只把 `state["rag"]` 标记为 `{"source": "deferred"}`。
+- `coordinator` 判断需要知识时才调用 `ensure_rag_loaded()`。
+- `smalltalk`、`correction`、缺槽补问不预检索，避免“你好”也命中一堆业务知识。
+- `llm_route_decision()` 可用时由模型决定 intent、route、slots、missing_slots。
+- `llm_coordinator_plan()` 可用时由模型决定需要哪些专家。
+- 失败时 fallback 到规则路由和规则专家计划。
 
-```json
-{
-  "intent": "house_recommend",
-  "route": "collaboration",
-  "slots": {
-    "city": "杭州",
-    "maxRent": 3000,
-    "houseId": null,
-    "contractId": null
-  },
-  "missing_slots": [],
-  "confidence": 0.9
-}
-```
+专家分工：
 
-如果找房但缺少城市，会进入 `slot_filling`，先让用户补充城市。
-
-### 4.2 Coordinator
-
-Coordinator 是主管智能体，决定本轮要调用哪些专家和工具。
-
-默认专家：
-
-- `house_search_specialist`：房源检索专家。
-- `map_life_specialist`：地图、通勤、周边生活专家。
-- `risk_analysis_specialist`：合同与租住风险专家。
-
-找房请求通常并行调用三个专家；合同问题更偏向风险专家；知识库问题走检索执行器。
-
-### 4.3 Collaboration
-
-`collaboration` 使用线程池并行执行专家，合并各专家工具结果，最后由 `synthesis` 统一输出给用户。这样可以避免多个专家分别对用户说话，保证回复口径一致。
-
-### 4.4 Synthesis
-
-`synthesis` 根据意图生成最终回答：
-
-- 找房：汇总房源、通勤和风险建议。
-- 合同：突出押金、付款周期、违约责任、维修责任。
-- 知识问答：列出命中的知识库片段。
-- 槽位缺失：提示用户补充必要字段。
-
-## 5. RAG 检索逻辑
-
-RAG 入口：
-
-```text
-ai-service/app/agent/rag/retriever.py
-ai-service/app/vector_store.py
-```
-
-检索优先级：
-
-1. 如果配置了 `MILVUS_URI` 或 `MILVUS_HOST`，优先查 Milvus。
-2. 如果 Milvus 不可用或无命中，则回退到 PostgreSQL + pgvector。
-3. 如果远程 Embedding 未配置，则使用本地 hash embedding 兜底。
-
-支持的知识来源：
-
-| 类型 | 内容 |
-| --- | --- |
-| `house` | 房源文档、标题、描述、标签 |
-| `contract` | 合同模板、条款、风险清单 |
-| `policy` | 平台政策、审核规则、业务流程 |
-| `faq` | 常见问题 |
-| `chat` | 业务沟通摘要 |
-| `enterprise` | 企业制度、SOP、运营规范 |
-
-知识写入接口：
-
-```text
-POST /api/v1/index/knowledge
-```
-
-房源写入接口：
-
-```text
-POST /api/v1/index/house
-```
-
-房源索引流程：
-
-```mermaid
-sequenceDiagram
-    participant J as Java
-    participant DB as MySQL
-    participant P as Python AI
-    participant V as Vector Store
-
-    J->>DB: 创建 ai_vector_index_task
-    J->>P: POST /api/v1/index/house
-    P->>P: build_house_content + chunk_text
-    P->>V: upsert_house_vectors
-    P-->>J: 返回 chunkCount/vectorCount
-    J->>DB: 更新任务状态和 house.aiIndexStatus
-```
-
-## 6. 工具调用逻辑
-
-工具分两类：Python 本地工具和 Java 业务工具。
-
-### 6.1 Python 本地工具
-
-注册位置：
-
-```text
-ai-service/app/tooling.py
-ai-service/app/main.py
-```
-
-工具通过装饰器注册：
-
-```python
-@tool("review_house_compliance")
-def review_house_compliance(state, **kwargs):
-    ...
-```
-
-当前主要工具：
-
-| 工具 | 作用 |
-| --- | --- |
-| `search_public_houses` | 检索公开房源索引 |
-| `search_knowledge_base` | 检索统一知识库 |
-| `review_house_compliance` | 房源合规审查 |
-| `explain_contract_risk` | 合同风险解释 |
-| `draft_listing_copy` | 生成房源文案 |
-| `draft_followup_message` | 生成跟进话术 |
-| `draft_transaction_form` | 生成业务弹窗字段建议 |
-| `summarize_business_record` | 摘要当前业务记录 |
-| `summarize_index_state` | 查看索引状态 |
-
-工具执行统一返回：
-
-```json
-{
-  "name": "search_public_houses",
-  "label": "检索房源索引",
-  "status": "success",
-  "resultSummary": "工具已完成",
-  "output": {},
-  "startedAt": "2026-06-15T16:00:00"
-}
-```
-
-### 6.2 Java 业务工具
-
-Python 工具层：
-
-```text
-ai-service/app/agent/tools/rental_business.py
-```
-
-Java 工具层：
-
-```text
-RuoYi-Vue/ruoyi-admin/src/main/java/com/ruoyi/web/controller/rental/RentalAiToolController.java
-```
-
-Python 调 Java 的工具包括：
-
-| Python 函数 | Java 路径 | 作用 |
+| 专家 | 触发场景 | 主要能力 |
 | --- | --- | --- |
-| `search_houses` | `/rental/ai/tools/houses/search` | 查询实时房源 |
-| `get_house_detail` | `/rental/ai/tools/houses/detail` | 查询房源详情 |
-| `get_contract` | `/rental/ai/tools/contracts/detail` | 查询合同详情 |
-| `get_house_map_context` | `/rental/ai/tools/amap/house-context` | 查询通勤与周边 |
-| `save_long_term_memory` | `/rental/ai/tools/memory/save` | 保存长期记忆 |
-| `execute_action` | `/rental/ai/tools/actions/execute` | 执行业务白名单动作 |
+| `house_search_specialist` | 找房、推荐、筛选 | 搜索公开房源、结合预算和城市排序 |
+| `map_life_specialist` | 周边、通勤、地图 | 调高德周边/路线工具 |
+| `risk_analysis_specialist` | 合同、押金、签约风险 | 调知识库和合同上下文 |
 
-如果 Java 工具层未配置，Python 会回退到本地工具或返回友好提示。
+图状态恢复：
 
-## 7. 记忆逻辑
+- `build_graph()` 已使用 `builder.compile(checkpointer=_CHECKPOINTER)`。
+- 每次调用使用 `checkpoint_config(session_id)`，thread_id 来源于会话或用户。
+- 服务重启后恢复依赖 Redis checkpointer；Redis 不可用时只保留进程内 MemorySaver。
 
-记忆分为短期记忆和长期记忆。
+## 10. RAG 和向量库
 
-### 7.1 短期记忆
+向量库实现位于 `ai-service/app/vector_store.py`，当前使用 PostgreSQL + pgvector。
 
-短期记忆保存在 Python 运行时内存：
+自动创建两张表：
 
-```text
-ai-service/app/runtime_store.py
-```
-
-每次对话后写入：
-
-```python
-update_memory(session_key, user_message, answer)
-```
-
-只保留最近若干轮，用于同一会话的上下文连续性。
-
-### 7.2 长期记忆
-
-租户 LangGraph 在 `persist_memory` 节点中调用：
-
-```python
-save_long_term_memory(...)
-```
-
-长期记忆通过 Java 工具层保存，适合记录稳定偏好，例如：
-
-- 用户预算上限。
-- 是否接受合租。
-- 期望地铁附近。
-- 是否养宠物。
-- 常用通勤目的地。
-
-临时信息不应写长期记忆，例如“今天下午有空”。
-
-## 8. 安全与权限边界
-
-AI 模块的安全边界如下：
-
-1. 用户身份由 Java 读取，不相信前端自行传入的角色。
-2. AI 只生成建议，不能绕过 Java 权限直接操作业务表。
-3. 房源审核、合同签署、预约创建、下架、成交等高风险动作必须经过 Java 校验。
-4. 写操作通过白名单控制，未在白名单内的动作会被拒绝。
-5. 高风险动作需要前端或用户二次确认。
-6. 工具调用需要记录审计日志，便于追踪 AI 做过什么。
-7. RAG 命中的知识只作为上下文，不允许知识内容覆盖系统规则。
-
-动作白名单示例：
-
-```text
-create_appointment
-favorite_house
-create_intention
-estimate_monthly_cost
-view_contract
-```
-
-## 9. 大模型接入逻辑
-
-系统支持 OpenAI 兼容接口。环境变量：
-
-```text
-AI_LLM_BASE_URL=https://example.com/v1
-AI_LLM_API_KEY=your-api-key
-AI_LLM_MODEL=qwen-plus
-```
-
-使用位置：
-
-- 意图识别：让模型输出结构化 JSON。
-- 主管规划：让模型决定专家和工具计划。
-- 回答润色：基于工具结果生成更自然的业务回复。
-
-兜底策略：
-
-- 未配置大模型时，系统使用关键词规则和本地工具。
-- 大模型调用失败时，返回规则答案。
-- 大模型必须基于工具结果回答，不允许编造房源、合同或用户信息。
-
-## 10. 能力响应格式
-
-AI 最终返回给前端的数据结构：
-
-```json
-{
-  "answer": "我先按预算、区域、通勤和签约风险一起看...",
-  "intent": "house_recommend",
-  "intentLabel": "房源推荐",
-  "skill": {},
-  "houseIds": [101, 205],
-  "toolCalls": [],
-  "collaboration": {},
-  "memoryUpdated": true,
-  "suggestions": {},
-  "nextActions": ["选中房源", "发起预约", "提交意向"],
-  "checkpoints": ["rag_prefetch", "router", "coordinator", "collaboration", "synthesis"],
-  "rag": {
-    "source": "pgvector",
-    "hits": []
-  }
-}
-```
-
-前端可以使用：
-
-- `answer` 展示 AI 回复。
-- `houseIds` 拉取或高亮推荐房源。
-- `toolCalls` 展示 AI 调用了哪些工具。
-- `suggestions` 自动回填审核理由、事务表单等字段。
-- `nextActions` 渲染下一步操作按钮。
-- `collaboration/checkpoints/rag` 展示智能体执行轨迹。
-
-## 11. 一个完整找房例子
-
-用户输入：
-
-```text
-预算 3000，杭州地铁附近，帮我推荐几套一室一厅。
-```
-
-执行流程：
-
-1. Vue 调用 `/rental/ai/chat`。
-2. Java 补充用户身份和角色后转发 Python。
-3. Python 识别为 `house_recommend`。
-4. Router 抽取槽位：城市杭州、预算 3000。
-5. Coordinator 决定并行调用房源、地图、风险专家。
-6. 房源专家调用 Java 实时房源工具或本地索引。
-7. 地图专家查询通勤和周边配套。
-8. 风险专家生成看房和签约注意事项。
-9. Synthesis 合并为一条自然语言回复。
-10. Persist memory 保存本轮偏好。
-11. 返回推荐房源 ID、工具调用记录和下一步动作。
-
-## 12. 扩展新能力的方法
-
-### 12.1 新增一个 Skill
-
-1. 在 `ai-service/app/skills` 新建 Markdown 文件。
-2. 在 `ai-service/app/skill_registry.py` 注册文件。
-3. 在意图到 Skill 的映射中加入新意图。
-
-### 12.2 新增一个 Python 工具
-
-1. 在 `ai-service/app/main.py` 或独立工具模块中写函数。
-2. 使用 `@tool("tool_name")` 注册。
-3. 在 `default_tool_plan()` 或 LangGraph 专家中调用。
-4. 在 `tool_label()` 和 `tool_description()` 中补充展示文案。
-
-### 12.3 新增一个 Java 业务工具
-
-1. 在 Java 增加 `/rental/ai/tools/**` 接口。
-2. 校验 `X-AI-Tool-Token`、用户、角色和数据权限。
-3. Python 在 `rental_business.py` 中封装调用。
-4. 写操作加入白名单和确认策略。
-5. 记录工具审计日志。
-
-### 12.4 新增一种 RAG 知识
-
-1. 确定 `sourceType`。
-2. 调用 `/api/v1/index/knowledge` 写入文档。
-3. 在检索路由中为对应 intent 增加 `source_types`。
-4. 前端根据需要展示引用片段。
-
-## 13. 关键文件索引
-
-| 文件 | 作用 |
+| 表 | 内容 |
 | --- | --- |
-| `RuoYi-Vue3/src/api/portal/ai.js` | 前端 AI API |
-| `RuoYi-Vue3/src/views/portal/index.vue` | 门户 AI 助手和业务工作台 |
-| `RuoYi-Vue/ruoyi-admin/src/main/java/com/ruoyi/web/controller/rental/RentalAiController.java` | Java AI 转发、索引任务 |
-| `RuoYi-Vue/ruoyi-admin/src/main/java/com/ruoyi/web/controller/rental/RentalAiToolController.java` | Java 业务工具层 |
-| `ai-service/app/main.py` | Python FastAPI 入口、通用 Agent |
-| `ai-service/app/agent/graph.py` | 租户 LangGraph 智能体 |
-| `ai-service/app/agent/tools/rental_business.py` | Python 调 Java 业务工具 |
-| `ai-service/app/agent/rag/retriever.py` | RAG 检索入口 |
-| `ai-service/app/vector_store.py` | pgvector/Milvus 兜底索引逻辑 |
-| `ai-service/app/tooling.py` | 工具注册和统一调用封装 |
-| `ai-service/app/skill_registry.py` | Skill 加载和意图映射 |
-| `ai-service/app/langchain_runtime.py` | LangChain 和 LLM 适配 |
+| `ai_house_chunks` | 房源文档分块、城市、租金、面积、payload、embedding |
+| `ai_knowledge_chunks` | 知识文档分块、source_type、source_id、roles、payload、embedding |
+
+知识来源类型：
+
+```text
+house, contract, policy, faq, chat, enterprise
+```
+
+embedding 逻辑：
+
+- 如果配置 `AI_EMBEDDING_BASE_URL`、`AI_EMBEDDING_API_KEY`、`AI_EMBEDDING_MODEL`，调用 OpenAI-compatible `/embeddings`。
+- 如果未配置或调用失败，使用本地哈希向量 `local-hash` 兜底。
+- `VECTOR_DB_EMBEDDING_DIM` 必须和实际 embedding 维度一致；远程模型换维度时需要重建或迁移向量表。
+
+知识检索逻辑：
+
+- `search_vector_knowledge()` 支持 `source_types` 过滤。
+- 使用 `AI_KNOWLEDGE_MIN_SCORE` 控制最低相似度，默认 `0.12`。
+- 检索结果按 `score` 排序，低分内容不会进入 prompt。
+- `agent/rag/retriever.py` 中 Milvus 可选优先；未配置 Milvus 或无命中时回退 pgvector。
+
+房源入库流程：
+
+1. 户主创建或更新房源，保存标题、地址、经纬度、图片、租金、面积等业务字段。
+2. Java 创建 `AiVectorIndexTask`。
+3. 管理员或任务消费者处理索引任务。
+4. Java 构造房源 AI 文档并调用 Python `POST /api/v1/index/house`。
+5. Python 分块并写入 `ai_house_chunks`。
+6. 租户搜索或 AI 问答时通过向量检索命中房源。
+
+知识入库流程：
+
+1. 管理员通过 `/rental/ai/index/knowledge` 提交知识文档。
+2. Java 转发 Python `POST /api/v1/index/knowledge`。
+3. Python 根据 `sourceType/sourceId/title/content/roles/payload` 分块。
+4. 写入 `ai_knowledge_chunks`。
+5. Agent 根据意图推断 `source_types`，例如合同风险优先查 `contract/policy/faq`。
+
+## 11. 高德地图接入
+
+高德有两条链路：浏览器选点和服务端 AI 工具。
+
+### 11.1 户主发布房源选点
+
+前端入口：
+
+- `RuoYi-Vue3/src/views/portal/index.vue`
+- `RuoYi-Vue3/src/utils/amap.js`
+
+配置：
+
+```text
+VITE_AMAP_JS_API_KEY=
+VITE_AMAP_SECURITY_JS_CODE=
+```
+
+实现方式：
+
+- 户主新建房源时打开位置选择器。
+- 如果高德 JS Key 可用，使用高德地图搜索和点选。
+- 选点后把 `longitude`、`latitude`、`address` 等字段随房源一起保存。
+- 后续房源索引任务会把地址和坐标写进 AI 房源文档，租户前端能看到，AI 也能检索和调用地图上下文。
+
+### 11.2 AI 调高德服务端工具
+
+Java 服务：
+
+- `RentalAmapService`
+- 配置项 `amap.api-key`
+- 环境变量 `AMAP_API_KEY`
+
+调用的高德 REST 能力：
+
+- `/v5/place/around`：周边 POI。
+- `/v3/geocode/geo`：地址转经纬度。
+- `/v3/direction/transit/integrated`：公交/地铁通勤。
+- `/v3/direction/driving`：驾车路线。
+- `/v3/direction/walking`：步行路线。
+
+AI 工具：
+
+- `amap_house_context`：基于房源坐标生成周边和通勤上下文。
+- `amap_around`：按坐标、关键词、城市查询周边。
+
+调用链：
+
+```text
+Python Agent -> Java /rental/ai/tools/amap/house-context -> RentalAmapService -> 高德 REST API
+```
+
+## 12. 记忆和多轮状态
+
+当前有三层记忆：
+
+| 类型 | 位置 | 用途 |
+| --- | --- | --- |
+| 请求历史 | Java 会话消息 + 请求 `history` | 给当前回答提供最近对话上下文 |
+| 短期记忆 | Python `update_memory()` / `merge_memory()` | 控制上下文窗口和摘要 |
+| LangGraph checkpoint | RedisBackedMemorySaver 或 MemorySaver | 恢复租户图多轮执行状态 |
+| 长期业务记忆 | Java `/rental/ai/tools/memory/save` | 保存用户偏好和可复用事实 |
+
+Checkpointer 默认行为：
+
+- `LANGGRAPH_CHECKPOINT_BACKEND=redis`。
+- 如果 `REDIS_URL` 或 `REDIS_HOST/REDIS_PORT/REDIS_PASSWORD` 可用，使用 Redis 持久化。
+- Redis key 默认 `langgraph:tenant_agent:checkpoints`。
+- `LANGGRAPH_CHECKPOINT_TTL_SECONDS` 可设置过期时间。
+- Redis 不可用时回退 `MemorySaver`，只能在当前进程内恢复。
+
+因此，服务重启后还要恢复租户图状态，必须保证 Redis 容器和 `redis-data` 卷正常。
+
+## 13. 大模型和 LangChain 接入
+
+AI 服务兼容 OpenAI 风格接口。
+
+LLM 配置：
+
+```text
+AI_LLM_BASE_URL=
+AI_LLM_API_KEY=
+AI_LLM_MODEL=
+```
+
+Embedding 配置：
+
+```text
+AI_EMBEDDING_BASE_URL=
+AI_EMBEDDING_API_KEY=
+AI_EMBEDDING_MODEL=
+AI_EMBEDDING_DIM=
+VECTOR_DB_EMBEDDING_DIM=
+```
+
+当前 LLM 用途：
+
+- 意图识别：`detect_intent_with_llm()`。
+- 工具规划：`plan_agent_tools_with_llm()`。
+- 租户图路由：`llm_route_decision()`。
+- 租户图协调：`llm_coordinator_plan()`。
+- 最终回复润色：`refine_with_llm_if_configured()`。
+
+降级策略：
+
+- LLM 未配置：走规则意图、默认工具计划和模板化回复。
+- embedding 未配置：走本地哈希向量。
+- LangGraph 不可用：走 `FallbackGraph` 顺序执行。
+- Redis 不可用：checkpointer 使用内存模式。
+- 高德未配置：地图工具返回降级说明，不阻塞主流程。
+
+## 14. 对象存储和图片
+
+图片存储当前预留了本地和腾讯 COS 两种方式。
+
+配置位于 Java `application.yml` 和根目录 `.env.example`：
+
+```text
+STORAGE_PROVIDER=local
+TENCENT_COS_SECRET_ID=
+TENCENT_COS_SECRET_KEY=
+TENCENT_COS_REGION=ap-beijing
+TENCENT_COS_BUCKET=homeimage-1419823100
+TENCENT_COS_PRESIGNED_EXPIRATION_SECONDS=43200
+```
+
+实现原则：
+
+- 房源图片由 Java 后端负责上传、保存 URL 或对象 key。
+- AI 房源文档只引用图片 URL、封面图和描述，不直接保存二进制图片。
+- 私有读桶时，Java 给前端预签名下载链接。
+- SecretId 和 SecretKey 只能放本机 `.env` 或服务器环境变量，不要写进 Git 文档、SQL 或前端代码。
+
+## 15. 部署配置
+
+Docker 编排位于 `docker-compose.yml`，包含：
+
+- `mysql`：RuoYi 和租赁业务库。
+- `redis`：登录缓存、LangGraph checkpoint 持久化。
+- `vector-db`：pgvector 向量库。
+- `ai-service`：Python FastAPI。
+- `backend`：RuoYi Java 后端。
+- `frontend`：Vue3 前端 Nginx。
+
+常用启动命令：
+
+```powershell
+docker compose up -d --build
+docker compose ps
+docker compose logs -f ai-service
+docker compose logs -f backend
+```
+
+能力检查：
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/health
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/api/v1/agent/capabilities
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1/captchaImage
+```
+
+前端访问：
+
+```text
+http://127.0.0.1/portal/index
+```
+
+## 16. 新增能力的方法
+
+### 16.1 新增一个 AI 工具
+
+1. 在 `ai-service/app/main.py` 或 `ai-service/app/agent/tools/**` 中实现函数。
+2. 用 `@tool("tool_name")` 或 LangChain `StructuredTool` 注册。
+3. 在 `tool_label()`、`tool_description()` 或工具 registry 中补说明。
+4. 把工具加入 `default_tool_plan()` 或允许 LLM planner 选择。
+5. 如果需要业务数据，优先新增 Java `/rental/ai/tools/**` 接口，不要让 Python 直接写业务库。
+
+### 16.2 新增一种知识来源
+
+1. 在 `KNOWLEDGE_SOURCE_TYPES` 中加入新的 `sourceType`。
+2. 调整 `infer_knowledge_source_types()` 或租户图 `infer_rag_source_types()`。
+3. 通过 `/rental/ai/index/knowledge` 写入文档。
+4. 检查 `search_vector_knowledge()` 的 `source_types` 过滤是否命中。
+5. 用 `/api/v1/agent/capabilities` 查看 `indexedKnowledge`。
+
+### 16.3 新增一个租户专家
+
+1. 在 `agent/graph.py` 增加专家处理函数。
+2. 在 `required_experts_for_state()` 中定义触发条件。
+3. 在 `llm_coordinator_plan()` 的 prompt 允许该专家名。
+4. 在 `collaboration()` 的 handlers 中注册。
+5. 在 `synthesis()` 中合并该专家输出。
+
+### 16.4 新增高风险动作
+
+高风险动作必须满足：
+
+- 前端只展示给有权限角色。
+- Java 控制器加 `@PreAuthorize`。
+- Java 服务层再次校验数据权限。
+- AI 工具接口使用 `X-AI-Tool-Token`。
+- 写 `AiToolAuditLog` 或业务审计日志。
+- 如果动作会修改业务数据，AI 只能生成 action request，用户确认后 Java 执行。
+
+## 17. 排障指南
+
+### 17.1 前端显示系统接口 502
+
+检查顺序：
+
+1. `docker compose ps` 看 `backend` 和 `ai-service` 是否 healthy。
+2. `docker compose logs -f backend` 看 Java 是否能访问 `ai.service.base-url`。
+3. `docker compose logs -f ai-service` 看 Python 是否启动成功。
+4. 打开 `http://127.0.0.1:8000/health`。
+5. 打开 `http://127.0.0.1:8000/api/v1/agent/capabilities`。
+
+### 17.2 AI 命中无关知识
+
+检查：
+
+- `agentPlan.sourceTypes` 是否过宽。
+- `search_vector_knowledge()` 是否传入 `source_types`。
+- `AI_KNOWLEDGE_MIN_SCORE` 是否过低。
+- 用户消息是否被错误识别成 `knowledge_answer` 或 `context_answer`。
+- `smalltalk/correction` 是否走了租户图的懒检索，而不是提前 RAG。
+
+### 17.3 “你好”返回业务审核内容
+
+应检查：
+
+- `detect_intent()` 是否识别为 `smalltalk`。
+- `graph.py` 中 `rag_prefetch` 是否只是 `deferred`。
+- `coordinator` 是否错误调用 `ensure_rag_loaded()`。
+- 前端是否带了错误的 `workMode` 或 `selected` 上下文。
+
+### 17.4 服务重启后多轮状态丢失
+
+检查：
+
+- `LANGGRAPH_CHECKPOINT_BACKEND=redis`。
+- `REDIS_HOST` 或 `REDIS_URL` 是否可用。
+- `docker-compose.yml` 中 `redis-data` 卷是否存在。
+- `/api/v1/agent/capabilities` 的 `checkpointer.persistent` 是否为 `true`。
+
+### 17.5 高德地图不可用
+
+前端选点失败：
+
+- 检查 `VITE_AMAP_JS_API_KEY`。
+- 检查高德控制台是否限制了正确域名。
+- 检查构建后是否重新启动前端容器。
+
+AI 地图工具失败：
+
+- 检查 `AMAP_API_KEY`。
+- 检查 Java `RentalAmapService` 日志。
+- 检查 Python 工具调用是否走到 `/rental/ai/tools/amap/**`。
+
+### 17.6 embedding 没有真正启用
+
+检查：
+
+- `AI_EMBEDDING_BASE_URL`、`AI_EMBEDDING_API_KEY`、`AI_EMBEDDING_MODEL` 是否都有值。
+- `AI_EMBEDDING_DIM` 是否等于 `VECTOR_DB_EMBEDDING_DIM`。
+- `/api/v1/agent/capabilities` 中 `embeddingMode` 是否为 `remote`。
+- 换 embedding 维度后是否重建 pgvector 表并重新索引。
+
+## 18. 当前实现结论
+
+当前 AI 层不是单一问答接口，而是“Java 业务边界 + Python 智能体编排 + RAG 向量库 + 高德工具 + Redis 图状态”的组合：
+
+- Java 保证权限、数据和事务正确。
+- Python 负责理解、计划、检索、组织回答。
+- RAG 让 AI 能访问房源、合同、政策、FAQ、聊天和企业知识。
+- 高德让房源位置、周边和通勤能力进入业务与 AI。
+- Redis checkpointer 让租户 LangGraph 支持服务重启后的多轮图状态恢复。
+- admin/auditor 权限分离，降低 AI 运维能力误暴露风险。
+
+后续维护时优先看 `agentPlan`、`toolCalls`、`checkpoints`、`capabilities` 四个输出，它们基本能解释一次 AI 回复为什么这样产生。
