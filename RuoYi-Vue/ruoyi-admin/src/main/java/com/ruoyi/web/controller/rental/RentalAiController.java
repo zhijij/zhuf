@@ -6,6 +6,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
 import com.ruoyi.common.core.domain.entity.SysRole;
 import com.ruoyi.common.core.domain.entity.SysUser;
@@ -152,7 +155,7 @@ public class RentalAiController
             String answer = body == null ? "" : String.valueOf(body.getOrDefault("answer", ""));
             if (StringUtils.isEmpty(answer))
             {
-                answer = "智能体接口已收到请求，等待后端返回标准化结果。";
+                return AjaxResult.error("智能体返回为空：模型没有生成 answer 字段");
             }
             AiConversationMessage assistantMessage = aiConversationService.addMessage(
                     conversationId,
@@ -169,7 +172,7 @@ public class RentalAiController
         }
         catch (Exception e)
         {
-            return AjaxResult.error("智能体服务暂不可用，请稍后再试");
+            return AjaxResult.error(aiServiceError(e));
         }
     }
 
@@ -184,7 +187,7 @@ public class RentalAiController
         }
         catch (Exception e)
         {
-            return AjaxResult.error("智能体能力服务暂不可用，请稍后再试");
+            return AjaxResult.error(aiServiceError(e));
         }
     }
 
@@ -497,7 +500,7 @@ public class RentalAiController
         }
         catch (Exception e)
         {
-            return AjaxResult.error("智能体服务暂不可用，请稍后再试");
+            return AjaxResult.error(aiServiceError(e));
         }
     }
 
@@ -739,6 +742,58 @@ public class RentalAiController
             message = e.getClass().getSimpleName();
         }
         return limitMessage(message);
+    }
+
+    private String aiServiceError(Exception e)
+    {
+        if (e instanceof HttpStatusCodeException httpError)
+        {
+            String responseBody = httpError.getResponseBodyAsString();
+            String parsed = parseAiErrorBody(responseBody);
+            if (StringUtils.isNotEmpty(parsed))
+            {
+                return limitMessage(parsed);
+            }
+        }
+        return safeError(e);
+    }
+
+    private String parseAiErrorBody(String responseBody)
+    {
+        if (StringUtils.isEmpty(responseBody))
+        {
+            return null;
+        }
+        try
+        {
+            JSONObject root = JSON.parseObject(responseBody);
+            Object detailValue = root.get("detail");
+            JSONObject detail = detailValue instanceof JSONObject ? (JSONObject) detailValue : null;
+            if (detail == null && detailValue instanceof Map)
+            {
+                detail = new JSONObject((Map) detailValue);
+            }
+            if (detail != null)
+            {
+                String code = detail.getString("code");
+                String type = detail.getString("type");
+                String message = detail.getString("message");
+                String label = StringUtils.isNotEmpty(code) ? code : type;
+                return StringUtils.isNotEmpty(label)
+                        ? "模型调用失败：" + label + " - " + message
+                        : "模型调用失败：" + message;
+            }
+            String message = root.getString("message");
+            if (StringUtils.isNotEmpty(message))
+            {
+                return "模型调用失败：" + message;
+            }
+        }
+        catch (Exception ignored)
+        {
+            return responseBody;
+        }
+        return responseBody;
     }
 
     private String limitMessage(String message)

@@ -59,12 +59,8 @@ def guarded(
 def safe_call(
     func: Callable[..., Any],
     *,
-    fallback: Any,
     name: str,
     retries: int = 0,
     **kwargs: Any,
 ) -> Any:
-    try:
-        return guarded(name=name, retries=retries)(func)(**kwargs)
-    except Exception:
-        return fallback
+    return guarded(name=name, retries=retries)(func)(**kwargs)

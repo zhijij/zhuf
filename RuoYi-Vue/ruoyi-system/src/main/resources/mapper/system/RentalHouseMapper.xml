@@ -84,6 +84,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             <if test="favoriteCount != null "> and favorite_count = #{favoriteCount}</if>
             <if test="aiIndexStatus != null  and aiIndexStatus != ''"> and ai_index_status = #{aiIndexStatus}</if>
         </where>
+        order by coalesce(update_time, create_time) desc, create_time desc, house_id desc
     </select>
     
     <select id="selectRentalHouseByHouseId" parameterType="Long" resultMap="RentalHouseResult">

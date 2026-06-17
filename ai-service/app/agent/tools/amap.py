@@ -21,7 +21,7 @@ def search_poi(
     limit: int = AMAP_POI_MAX_RESULTS,
 ) -> dict[str, Any]:
     if not amap_enabled():
-        return {"enabled": False, "summary": "高德工具未配置，使用看房清单兜底", "pois": []}
+        raise RuntimeError("AMAP_API_KEY 未配置，无法查询高德周边")
 
     def call() -> dict[str, Any]:
         pois = _search_around(keywords, location, city, radius, limit) if location else _search_text(keywords, city)
@@ -37,7 +37,7 @@ def search_poi(
             "pois": pois,
         }
 
-    return safe_call(call, fallback={"enabled": False, "summary": "高德周边查询失败", "pois": []}, name="amap.poi")
+    return safe_call(call, name="amap.poi")
 
 
 def _search_around(keywords: str, location: str | None, city: str | None, radius: int, limit: int) -> list[dict[str, Any]]:
@@ -88,7 +88,7 @@ def estimate_route(
     mode: str = "transit",
 ) -> dict[str, Any]:
     if not amap_enabled() or not origin or not destination:
-        return {"enabled": False, "summary": "路线预算缺少坐标或高德配置"}
+        raise RuntimeError("路线查询缺少坐标或 AMAP_API_KEY 未配置")
 
     route_mode = mode if mode in {"transit", "driving", "walking"} else "transit"
     path = {
@@ -133,7 +133,7 @@ def estimate_route(
             "raw": first,
         }
 
-    return safe_call(call, fallback={"enabled": False, "summary": "高德路线查询失败"}, name="amap.route")
+    return safe_call(call, name="amap.route")
 
 
 def _minutes(seconds: Any) -> str:

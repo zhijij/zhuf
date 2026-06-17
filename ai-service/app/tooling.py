@@ -15,27 +15,16 @@ def tool(name: str):
 
 def call_tool(name: str, state: dict[str, Any], **kwargs) -> dict[str, Any]:
     started = datetime.now().isoformat(timespec="seconds")
-    try:
-        output = TOOL_REGISTRY[name](state, **kwargs)
-        return {
-            "name": name,
-            "label": tool_label(name),
-            "args": kwargs,
-            "status": "success",
-            "resultSummary": output.get("summary", "工具已完成"),
-            "output": output,
-            "startedAt": started,
-        }
-    except Exception as exc:
-        return {
-            "name": name,
-            "label": tool_label(name),
-            "args": kwargs,
-            "status": "error",
-            "resultSummary": str(exc)[:300],
-            "output": {},
-            "startedAt": started,
-        }
+    output = TOOL_REGISTRY[name](state, **kwargs)
+    return {
+        "name": name,
+        "label": tool_label(name),
+        "args": kwargs,
+        "status": "success",
+        "resultSummary": output.get("summary", "工具已完成"),
+        "output": output,
+        "startedAt": started,
+    }
 
 
 def tool_label(name: str) -> str:

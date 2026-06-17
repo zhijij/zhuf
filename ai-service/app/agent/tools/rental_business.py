@@ -18,7 +18,7 @@ def java_tools_token() -> str:
 def _post_java_tool(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     base_url = java_tools_base_url()
     if not base_url:
-        return {"success": False, "message": "Java AI 工具层未配置"}
+        raise RuntimeError("JAVA_AI_TOOLS_BASE_URL 未配置，无法调用 Java AI 工具层")
     headers = {}
     token = java_tools_token()
     if token:
@@ -32,7 +32,6 @@ def _post_java_tool(path: str, payload: dict[str, Any]) -> dict[str, Any]:
 def search_houses(state: dict[str, Any], query: str | None = None, city: str | None = None, max_rent: int | None = None) -> dict[str, Any]:
     java_result = safe_call(
         _post_java_tool,
-        fallback=None,
         name="java.search_houses",
         path="/rental/ai/tools/houses/search",
         payload={
@@ -43,9 +42,9 @@ def search_houses(state: dict[str, Any], query: str | None = None, city: str | N
             "maxRent": max_rent,
         },
     )
-    if java_result and java_result.get("success") is not False:
-        return java_result
-    return call_tool("search_public_houses", state, query=query, city=city, maxRent=max_rent).get("output") or {}
+    if java_result.get("success") is False:
+        raise RuntimeError(str(java_result.get("message") or "Java 房源检索工具返回失败"))
+    return java_result
 
 
 def get_house_detail(state: dict[str, Any], house_id: int | str | None) -> dict[str, Any]:
@@ -53,7 +52,6 @@ def get_house_detail(state: dict[str, Any], house_id: int | str | None) -> dict[
         return {"success": False, "message": "缺少房源 ID"}
     return safe_call(
         _post_java_tool,
-        fallback={"success": False, "message": "房源详情工具暂不可用"},
         name="java.house_detail",
         path="/rental/ai/tools/houses/detail",
         payload={"userId": state.get("user", {}).get("userId"), "houseId": house_id},
@@ -65,7 +63,6 @@ def get_contract(state: dict[str, Any], contract_id: int | str | None) -> dict[s
         return {"success": False, "message": "缺少合同 ID"}
     return safe_call(
         _post_java_tool,
-        fallback={"success": False, "message": "合同工具暂不可用"},
         name="java.contract",
         path="/rental/ai/tools/contracts/detail",
         payload={"userId": state.get("user", {}).get("userId"), "contractId": contract_id},
@@ -82,7 +79,6 @@ def get_house_map_context(
         return {"success": False, "message": "缺少房源 ID，无法查询通勤与周边"}
     return safe_call(
         _post_java_tool,
-        fallback={"success": False, "message": "高德房源上下文工具暂不可用"},
         name="java.amap.house_context",
         path="/rental/ai/tools/amap/house-context",
         payload={
@@ -107,7 +103,6 @@ def search_amap_around(
         return {"success": False, "message": "缺少坐标，无法查询周边"}
     return safe_call(
         _post_java_tool,
-        fallback={"success": False, "message": "高德周边搜索工具暂不可用"},
         name="java.amap.around",
         path="/rental/ai/tools/amap/around",
         payload={
@@ -125,7 +120,6 @@ def search_amap_around(
 def save_long_term_memory(state: dict[str, Any], content: str, memory_type: str = "summary") -> dict[str, Any]:
     return safe_call(
         _post_java_tool,
-        fallback={"success": False, "message": "长期记忆工具暂不可用"},
         name="java.memory.save",
         path="/rental/ai/tools/memory/save",
         payload={
@@ -140,7 +134,6 @@ def save_long_term_memory(state: dict[str, Any], content: str, memory_type: str 
 def execute_action(state: dict[str, Any], action: str, payload: dict[str, Any], confirmed: bool = False) -> dict[str, Any]:
     return safe_call(
         _post_java_tool,
-        fallback={"success": False, "message": "动作工具暂不可用"},
         name=f"java.action.{action}",
         path="/rental/ai/tools/actions/execute",
         payload={

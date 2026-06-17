@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from app import runtime_store as store
 from app.business_rules import (
@@ -15,8 +15,6 @@ from app.business_rules import (
     chunk_text,
     clean_dict,
     default_knowledge_documents,
-    extract_budget,
-    extract_city,
     house_brief,
     knowledge_match_line,
     knowledge_reference_lines,
@@ -53,6 +51,21 @@ from app.vector_store import (
 )
 
 app = FastAPI(title="Rental AI Service", version="0.2.0")
+AGENT_INTENTS = {
+    "smalltalk",
+    "correction",
+    "house_recommend",
+    "transaction_draft",
+    "record_summary",
+    "compliance_review",
+    "contract_risk",
+    "listing_copy",
+    "followup_message",
+    "chat_assist",
+    "index_advice",
+    "knowledge_answer",
+    "context_answer",
+}
 
 
 class AgentToolPlan(BaseModel):
@@ -60,6 +73,7 @@ class AgentToolPlan(BaseModel):
     tools: list[str] = Field(default_factory=list)
     ask_user: list[str] = Field(default_factory=list)
     source_types: list[str] = Field(default_factory=list)
+    slots: dict[str, Any] = Field(default_factory=dict)
     reason: str = Field(default="")
 
 
@@ -67,7 +81,6 @@ TENANT_LANGGRAPH_AGENTS = [
     "rag_prefetch",
     "router",
     "coordinator",
-    "llm_unconfigured",
     "smalltalk",
     "slot_filling",
     "collaboration",
@@ -144,93 +157,138 @@ def agent_capabilities():
 
 @app.post("/api/v1/agent/chat")
 def chat(request: ChatRequest):
-    state = build_agent_state(request)
-    intent = detect_intent(request.message, state)
-    if intent == "chat_assist":
-        response = run_chat_business_agent(state)
-        answer = response.get("answer") or ""
-        response["memoryUpdated"] = update_memory(state["sessionKey"], request.message, answer)
-        return response
+    try:
+        state = build_agent_state(request)
+        intent = detect_intent(request.message, state)
+        if intent == "chat_assist":
+            response = run_chat_business_agent(state)
+            answer = response.get("answer") or ""
+            response["memoryUpdated"] = update_memory(state["sessionKey"], request.message, answer)
+            return response
 
-    skill = select_skill(intent, state)
-    if should_use_tenant_graph(state, intent):
-        return run_tenant_graph(build_tenant_graph_request(request, state))
+        skill = select_skill(intent, state)
+        if should_use_tenant_graph(state, intent):
+            return run_tenant_graph(build_tenant_graph_request(request, state))
 
-    tool_calls = run_agent_tools(intent, state)
-    answer = render_agent_answer(intent, state, tool_calls)
-    answer = refine_with_llm_if_configured(state, intent, tool_calls, answer, skill)
-    memory_updated = update_memory(state["sessionKey"], request.message, answer)
+        tool_calls = run_agent_tools(intent, state)
+        answer = render_agent_answer(intent, state, tool_calls)
+        answer = refine_with_llm_if_configured(state, intent, tool_calls, answer, skill)
+        memory_updated = update_memory(state["sessionKey"], request.message, answer)
 
-    return {
-        "answer": answer,
-        "intent": intent,
-        "intentLabel": INTENT_LABELS.get(intent, intent),
-        "agentPlan": state.get("agentPlan"),
-        "skill": skill_to_dict(skill),
-        "houseIds": collect_house_ids(state, tool_calls),
-        "toolCalls": tool_calls,
-        "memoryUpdated": memory_updated,
-        "suggestions": extract_suggestions(tool_calls),
-        "nextActions": build_next_actions(intent, state, tool_calls),
-    }
+        return {
+            "answer": answer,
+            "intent": intent,
+            "intentLabel": INTENT_LABELS.get(intent, intent),
+            "agentPlan": state.get("agentPlan"),
+            "skill": skill_to_dict(skill),
+            "houseIds": collect_house_ids(state, tool_calls),
+            "toolCalls": tool_calls,
+            "memoryUpdated": memory_updated,
+            "suggestions": extract_suggestions(tool_calls),
+            "nextActions": build_next_actions(intent, state, tool_calls),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise_ai_model_error(exc)
 
 
 @app.post("/api/v1/agent/recommend")
 def recommend(request: RecommendRequest):
-    state = {
-        "message": request.query,
-        "role": request.role or "tenant",
-        "roleLabel": ROLE_LABELS.get(request.role or "tenant", request.role or "tenant"),
-        "roles": request.roles or [],
-        "isAdmin": bool(request.isAdmin),
-        "context": request.context or {},
-        "selected": (request.context or {}).get("selected") or {},
-        "filters": (request.context or {}).get("filters") or {},
-        "visibleActions": (request.context or {}).get("visibleActions") or [],
-        "summary": (request.context or {}).get("summary") or {},
-        "sessionKey": f"user:{request.userId or 'anonymous'}",
-        "transactionType": None,
-        "transactionTitle": None,
-        "recommend": {"city": request.city, "maxRent": request.maxRent},
-        "memory": [],
-    }
-    if should_use_tenant_graph(state, "house_recommend"):
-        return run_tenant_graph({
-            "query": request.query,
+    try:
+        state = {
             "message": request.query,
-            "city": request.city,
-            "maxRent": request.maxRent,
-            "userId": request.userId,
-            "username": request.username,
-            "role": state.get("role"),
+            "role": request.role or "tenant",
+            "roleLabel": ROLE_LABELS.get(request.role or "tenant", request.role or "tenant"),
             "roles": request.roles or [],
             "isAdmin": bool(request.isAdmin),
             "context": request.context or {},
-            "sessionId": request.userId or "anonymous",
+            "selected": (request.context or {}).get("selected") or {},
+            "filters": (request.context or {}).get("filters") or {},
+            "visibleActions": (request.context or {}).get("visibleActions") or [],
+            "summary": (request.context or {}).get("summary") or {},
+            "sessionKey": f"user:{request.userId or 'anonymous'}",
+            "transactionType": None,
+            "transactionTitle": None,
             "recommend": {"city": request.city, "maxRent": request.maxRent},
-        })
+            "memory": [],
+        }
+        if should_use_tenant_graph(state, "house_recommend"):
+            return run_tenant_graph({
+                "query": request.query,
+                "message": request.query,
+                "city": request.city,
+                "maxRent": request.maxRent,
+                "userId": request.userId,
+                "username": request.username,
+                "role": state.get("role"),
+                "roles": request.roles or [],
+                "isAdmin": bool(request.isAdmin),
+                "context": request.context or {},
+                "sessionId": request.userId or "anonymous",
+                "recommend": {"city": request.city, "maxRent": request.maxRent},
+            })
 
-    skill = select_skill("house_recommend", state)
-    tool_calls = [
-        call_tool(
-            "search_public_houses",
-            state,
-            query=request.query,
-            city=request.city,
-            maxRent=request.maxRent,
-        )
-    ]
-    answer = render_agent_answer("house_recommend", state, tool_calls)
-    answer = refine_with_llm_if_configured(state, "house_recommend", tool_calls, answer, skill)
+        skill = select_skill("house_recommend", state)
+        tool_calls = [
+            call_tool(
+                "search_public_houses",
+                state,
+                query=request.query,
+                city=request.city,
+                maxRent=request.maxRent,
+            )
+        ]
+        answer = render_agent_answer("house_recommend", state, tool_calls)
+        answer = refine_with_llm_if_configured(state, "house_recommend", tool_calls, answer, skill)
+        return {
+            "answer": answer,
+            "intent": "house_recommend",
+            "intentLabel": INTENT_LABELS["house_recommend"],
+            "skill": skill_to_dict(skill),
+            "houseIds": collect_house_ids(state, tool_calls),
+            "toolCalls": tool_calls,
+            "memoryUpdated": False,
+            "nextActions": build_next_actions("house_recommend", state, tool_calls),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise_ai_model_error(exc)
+
+
+def raise_ai_model_error(exc: Exception) -> None:
+    detail = format_ai_model_error(exc)
+    raise HTTPException(status_code=502, detail=detail)
+
+
+def format_ai_model_error(exc: Exception) -> dict[str, Any]:
+    response = getattr(exc, "response", None)
+    payload: Any = None
+    if response is not None:
+        try:
+            payload = response.json()
+        except Exception:
+            payload = getattr(response, "text", None)
+
+    if isinstance(payload, dict):
+        error = payload.get("error") if isinstance(payload.get("error"), dict) else payload
+        message = str(error.get("message") or payload.get("message") or exc)
+        code = str(error.get("code") or payload.get("code") or exc.__class__.__name__)
+        error_type = str(error.get("type") or payload.get("type") or "")
+        return {
+            "message": message,
+            "code": code,
+            "type": error_type,
+            "provider": "llm",
+        }
+
+    message = str(payload or exc)
     return {
-        "answer": answer,
-        "intent": "house_recommend",
-        "intentLabel": INTENT_LABELS["house_recommend"],
-        "skill": skill_to_dict(skill),
-        "houseIds": collect_house_ids(state, tool_calls),
-        "toolCalls": tool_calls,
-        "memoryUpdated": False,
-        "nextActions": build_next_actions("house_recommend", state, tool_calls),
+        "message": message,
+        "code": exc.__class__.__name__,
+        "type": "",
+        "provider": "llm",
     }
 
 
@@ -452,57 +510,39 @@ def detect_intent(message: str, state: dict[str, Any]) -> str:
     if state.get("transactionType"):
         return "transaction_draft"
 
-    llm_intent = detect_intent_with_llm(message, state)
-    if llm_intent:
-        return llm_intent
-
-    text = (message or "").lower()
-    role = state.get("role")
-    if has_any(text, ["不对", "不对吧", "不太对", "不准确", "不是这个", "你理解错了", "重新来", "重说", "纠正一下"]):
-        return "correction"
-    if state.get("transactionType"):
-        return "transaction_draft"
-    if has_any(text, ["索引", "向量", "知识库", "入库", "召回"]):
-        return "index_advice"
-    if has_any(text, ["政策", "制度", "流程", "faq", "常见问题", "规则", "规范", "资料", "文档", "知识"]):
-        return "knowledge_answer"
-    if has_any(text, ["审核", "审查", "合规", "违规", "虚假", "待审"]) or (
-        role in ["auditor", "admin"] and has_any(text, ["通过", "驳回", "发布", "下架", "风险"])
-    ):
-        return "compliance_review"
-    if has_any(text, ["合同", "条款", "签约", "风险", "违约", "押金"]):
-        return "contract_risk"
-    if has_any(text, ["文案", "发布", "卖点", "描述", "标题"]):
-        return "listing_copy"
-    if has_any(text, ["推荐", "匹配", "找房", "房源", "预算", "地铁", "两居", "整租"]):
-        return "house_recommend"
-    if has_any(text, ["跟进", "沟通", "话术", "回复", "催促", "约看"]):
-        return "followup_message"
-    if has_any(text, ["总结", "摘要", "当前业务", "进度", "下一步", "梳理"]):
-        return "record_summary"
-    return "context_answer"
+    llm_route = detect_intent_with_llm(message, state)
+    state["intentRouting"] = llm_route
+    return llm_route["intent"]
 
 
-def detect_intent_with_llm(message: str, state: dict[str, Any]) -> str | None:
+def detect_intent_with_llm(message: str, state: dict[str, Any]) -> dict[str, Any] | None:
     base_url = os.getenv("AI_LLM_BASE_URL", "").rstrip("/")
     api_key = os.getenv("AI_LLM_API_KEY", "")
     model = os.getenv("AI_LLM_MODEL", "")
     if not base_url or not api_key or not model:
-        return None
+        raise RuntimeError("AI_LLM_BASE_URL、AI_LLM_API_KEY 或 AI_LLM_MODEL 未配置，无法调用模型判断意图")
 
     messages = [
         ("system",
          "你是企业租赁智能体的意图路由器。"
-         "请输出 JSON，字段 intent 只能是："
+         "请根据用户消息、角色、已选业务记录、筛选条件和最近记忆输出 JSON。"
+         "字段 intent 只能是："
          "smalltalk, correction, house_recommend, transaction_draft, record_summary, compliance_review, "
-         "contract_risk, listing_copy, followup_message, chat_assist, index_advice, knowledge_answer, context_answer。"),
+         "contract_risk, listing_copy, followup_message, chat_assist, index_advice, knowledge_answer, context_answer。"
+         "字段 source_types 可选，只允许 house, contract, policy, faq, chat, enterprise。"
+         "字段 slots 可选，找房相关可包含 city、district、maxRent。"
+         "不要靠单个词机械判断：例如用户问押金规则但未选合同，应优先 knowledge_answer；"
+         "用户要求审当前合同或已选合同风险，才是 contract_risk；租户找城市/区县房源时是 house_recommend。"
+         "如果无法确定，输出 context_answer，不要编造业务状态。"),
         ("user",
          json.dumps({
              "message": message,
              "role": state.get("role"),
              "selected": state.get("selected") or {},
+             "filters": state.get("filters") or {},
              "chat": (state.get("context") or {}).get("chat") or {},
              "transactionType": state.get("transactionType"),
+             "memory": state.get("memory") or [],
          }, ensure_ascii=False))
     ]
     data = invoke_structured_json(
@@ -512,18 +552,39 @@ def detect_intent_with_llm(message: str, state: dict[str, Any]) -> str | None:
         messages=messages,
         timeout=8,
     )
+    if not data:
+        raise RuntimeError("模型没有返回意图路由 JSON")
     intent = str((data or {}).get("intent") or "").strip()
-    if intent in {
-        "smalltalk", "correction", "house_recommend", "transaction_draft", "record_summary",
-        "compliance_review", "contract_risk", "listing_copy", "followup_message",
-        "chat_assist", "index_advice", "knowledge_answer", "context_answer",
-    }:
-        return intent
-    return None
+    if intent in AGENT_INTENTS:
+        return {
+            "intent": intent,
+            "sourceTypes": normalize_source_type_list((data or {}).get("source_types") or (data or {}).get("sourceTypes") or []),
+            "slots": normalize_agent_slots((data or {}).get("slots") or {}),
+            "reason": str((data or {}).get("reason") or ""),
+        }
+    raise RuntimeError(f"模型返回了不支持的意图：{intent or data}")
 
 
-def has_any(text: str, keywords: list[str]) -> bool:
-    return any(keyword in text for keyword in keywords)
+def normalize_source_type_list(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    result = []
+    for item in values:
+        name = str(item)
+        if name in KNOWLEDGE_SOURCE_TYPES and name not in result:
+            result.append(name)
+    return result
+
+
+def normalize_agent_slots(values: Any) -> dict[str, Any]:
+    if not isinstance(values, dict):
+        return {}
+    slots = {}
+    for key in ["city", "district", "maxRent"]:
+        value = values.get(key)
+        if value not in (None, ""):
+            slots[key] = value
+    return slots
 
 
 def default_tool_plan(intent: str) -> list[str]:
@@ -545,6 +606,9 @@ def default_tool_plan(intent: str) -> list[str]:
 
 
 def infer_knowledge_source_types(intent: str, state: dict[str, Any]) -> list[str]:
+    routed = normalize_source_type_list((state.get("intentRouting") or {}).get("sourceTypes") or [])
+    if routed:
+        return routed
     selected = state.get("selected") or {}
     if intent == "contract_risk":
         return ["contract", "policy", "faq"]
@@ -553,11 +617,6 @@ def infer_knowledge_source_types(intent: str, state: dict[str, Any]) -> list[str
     if intent in ["followup_message", "chat_assist"]:
         return ["enterprise", "chat", "faq"]
     if intent == "knowledge_answer":
-        text = str(state.get("message") or "")
-        if "合同" in text:
-            return ["contract", "faq", "policy"]
-        if "政策" in text or "规则" in text or "制度" in text:
-            return ["policy", "faq", "enterprise"]
         return ["faq", "policy", "enterprise", "chat"]
     if intent == "context_answer" and selected.get("contractId"):
         return ["contract", "chat", "enterprise"]
@@ -569,7 +628,7 @@ def plan_agent_tools_with_llm(intent: str, state: dict[str, Any]) -> dict[str, A
     api_key = os.getenv("AI_LLM_API_KEY", "")
     model = os.getenv("AI_LLM_MODEL", "")
     if not base_url or not api_key or not model:
-        return None
+        raise RuntimeError("AI_LLM_BASE_URL、AI_LLM_API_KEY 或 AI_LLM_MODEL 未配置，无法调用模型规划工具")
 
     allowed_tools = sorted(TOOL_REGISTRY.keys())
     default_plan = default_tool_plan(intent)
@@ -601,19 +660,17 @@ def plan_agent_tools_with_llm(intent: str, state: dict[str, Any]) -> dict[str, A
         timeout=8,
     )
     if not data:
-        return None
-    try:
-        planned = AgentToolPlan(
-            intent=str(data.get("intent") or intent),
-            tools=[str(item) for item in (data.get("tools") or []) if str(item) in TOOL_REGISTRY],
-            ask_user=[str(item) for item in (data.get("ask_user") or []) if item],
-            source_types=[str(item) for item in (data.get("source_types") or []) if item in KNOWLEDGE_SOURCE_TYPES],
-            reason=str(data.get("reason") or ""),
-        )
-    except Exception:
-        return None
+        raise RuntimeError("模型没有返回工具规划 JSON")
+    planned = AgentToolPlan(
+        intent=str(data.get("intent") or intent),
+        tools=[str(item) for item in (data.get("tools") or []) if str(item) in TOOL_REGISTRY],
+        ask_user=[str(item) for item in (data.get("ask_user") or []) if item],
+        source_types=normalize_source_type_list(data.get("source_types") or data.get("sourceTypes") or []),
+        slots=normalize_agent_slots(data.get("slots") or {}),
+        reason=str(data.get("reason") or ""),
+    )
 
-    tools = merge_tool_plan(default_plan, planned.tools)
+    tools = planned.tools
     if intent == "chat_assist" and "summarize_chat_context" not in tools:
         tools = ["summarize_chat_context", *tools]
     return {
@@ -621,6 +678,7 @@ def plan_agent_tools_with_llm(intent: str, state: dict[str, Any]) -> dict[str, A
         "tools": tools,
         "askUser": planned.ask_user,
         "sourceTypes": planned.source_types or infer_knowledge_source_types(intent, state),
+        "slots": planned.slots or normalize_agent_slots((state.get("intentRouting") or {}).get("slots") or {}),
         "reason": planned.reason,
         "mode": "llm",
     }
@@ -641,26 +699,19 @@ def build_agent_tool_plan(intent: str, state: dict[str, Any]) -> dict[str, Any]:
             "tools": default_tool_plan(intent),
             "askUser": [],
             "sourceTypes": infer_knowledge_source_types(intent, state),
+            "slots": normalize_agent_slots((state.get("intentRouting") or {}).get("slots") or {}),
             "reason": "business-chat-fixed-agent-flow",
             "mode": "workflow",
         }
 
     llm_plan = plan_agent_tools_with_llm(intent, state)
-    if llm_plan:
-        return llm_plan
-    return {
-        "intent": intent,
-        "tools": default_tool_plan(intent),
-        "askUser": [],
-        "sourceTypes": infer_knowledge_source_types(intent, state),
-        "reason": "fallback-default-plan",
-        "mode": "fallback",
-    }
+    return llm_plan
 
 
 def run_agent_tools(intent: str, state: dict[str, Any]) -> list[dict[str, Any]]:
     plan = build_agent_tool_plan(intent, state)
     state["agentPlan"] = plan
+    state["routeSlots"] = normalize_agent_slots(plan.get("slots") or {})
     tool_calls = []
     for name in plan.get("tools") or []:
         kwargs = {}
@@ -679,9 +730,12 @@ def search_public_houses(
 ) -> dict[str, Any]:
     ensure_vector_store()
     query = query or state.get("message") or ""
+    slots = normalize_agent_slots(state.get("routeSlots") or (state.get("intentRouting") or {}).get("slots") or {})
+    if slots.get("district") and str(slots.get("district")) not in query:
+        query = " ".join([str(slots.get("city") or "").strip(), str(slots.get("district")).strip(), query]).strip()
     normalized_query = normalize_house_query(query)
-    city = city or extract_city(query) or state.get("filters", {}).get("city")
-    max_rent = maxRent or extract_budget(query)
+    city = city or slots.get("city") or state.get("filters", {}).get("city")
+    max_rent = maxRent or as_int(slots.get("maxRent")) or as_int(state.get("filters", {}).get("maxRent"))
     candidates = search_vector_houses(normalized_query or query, city, max_rent)
     if not candidates:
         candidates = list(store.HOUSE_INDEX.values())
@@ -691,6 +745,8 @@ def search_public_houses(
 
     scored = []
     for house in candidates:
+        if not public_house_matches_slots(house, city, str(slots.get("district") or "")):
+            continue
         score = score_house(house, normalized_query or query, city, max_rent)
         if score > 0:
             scored.append((score, house))
@@ -708,6 +764,16 @@ def search_public_houses(
         "city": city,
         "maxRent": max_rent,
     }
+
+
+def public_house_matches_slots(house: dict[str, Any], city: str | None, district: str | None) -> bool:
+    house_city = str(house.get("city") or "")
+    house_district = str(house.get("district") or "")
+    if city and city not in house_city and str(city).removesuffix("市") not in house_city:
+        return False
+    if district and district not in house_district and str(district).removesuffix("区") not in house_district:
+        return False
+    return True
 
 
 @tool("amap_house_context")
@@ -891,8 +957,6 @@ def review_house_compliance(state: dict[str, Any], **_: Any) -> dict[str, Any]:
         }
 
     checks: list[dict[str, Any]] = []
-    risks: list[str] = []
-    warnings: list[str] = []
 
     required_fields = [
         ("标题", "title"),
@@ -907,42 +971,15 @@ def review_house_compliance(state: dict[str, Any], **_: Any) -> dict[str, Any]:
         value = selected.get(key)
         passed = value not in (None, "")
         checks.append({"label": label, "passed": passed})
-        if not passed:
-            risks.append(f"{label}缺失")
 
-    rent = as_int(selected.get("rentAmount"))
-    area = as_int(selected.get("area"))
-    if rent is not None and rent <= 0:
-        risks.append("租金必须大于 0")
-    if area is not None and area <= 0:
-        risks.append("面积必须大于 0")
-
-    description = str(selected.get("description") or "").strip()
-    if not description:
-        warnings.append("缺少房源描述，建议补充小区、通勤、家具家电、看房时间。")
-    elif len(description) < 20:
-        warnings.append("房源描述过短，建议补充影响租户决策的信息。")
-
-    status = str(selected.get("auditStatus") or selected.get("status") or "")
-    if status and status not in ["1", "pending", "待审核", "待合规审核"]:
-        warnings.append("当前房源看起来不是待审核状态，提交前请确认是否重复审核。")
-
-    risk_text = " ".join(
-        str(selected.get(key) or "")
-        for key in ["title", "subtitle", "description", "tags", "facilities", "address", "community"]
-    )
-    risky_keywords = ["群租", "隔断", "虚假", "无证", "无合同", "先打款", "私下转账", "百分百", "低价急租", "学区承诺", "押一付十二"]
-    matched_keywords = [keyword for keyword in risky_keywords if keyword in risk_text]
-    if matched_keywords:
-        risks.append("存在需人工核验的风险词：" + "、".join(matched_keywords))
-
-    recommendation = "reject" if risks else "approve"
-    audit_reason = build_audit_reason(selected, recommendation, risks, warnings)
-    summary = "建议通过并发布。" if recommendation == "approve" else "建议驳回，待户主补充或修正后重新提交。"
-    if risks:
-        summary += " 主要问题：" + "；".join(risks[:4])
-    elif warnings:
-        summary += " 注意事项：" + "；".join(warnings[:3])
+    ai_review = review_house_compliance_with_llm(selected, checks, state)
+    risks = normalize_text_list(ai_review.get("risks") or [])
+    warnings = normalize_text_list(ai_review.get("warnings") or [])
+    recommendation = normalize_recommendation(ai_review.get("recommendation"))
+    audit_reason = str(ai_review.get("auditReason") or "").strip() or build_audit_reason(selected, recommendation, risks, warnings)
+    summary = str(ai_review.get("summary") or "").strip()
+    if not summary:
+        raise RuntimeError("模型没有生成房源合规审查摘要")
 
     return {
         "summary": summary,
@@ -955,6 +992,61 @@ def review_house_compliance(state: dict[str, Any], **_: Any) -> dict[str, Any]:
             "auditReason": audit_reason,
         },
     }
+
+
+def review_house_compliance_with_llm(
+    selected: dict[str, Any],
+    checks: list[dict[str, Any]],
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    base_url = os.getenv("AI_LLM_BASE_URL", "").rstrip("/")
+    api_key = os.getenv("AI_LLM_API_KEY", "")
+    model = os.getenv("AI_LLM_MODEL", "")
+    if not base_url or not api_key or not model:
+        raise RuntimeError("AI_LLM_BASE_URL、AI_LLM_API_KEY 或 AI_LLM_MODEL 未配置，无法调用模型审查房源合规")
+    data = invoke_structured_json(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        timeout=8,
+        messages=[
+            (
+                "system",
+                "你是房源合规审查智能体。"
+                "只基于房源字段和必填项检查输出 JSON。"
+                "字段必须包含 recommendation、summary、risks、warnings、auditReason。"
+                "recommendation 只能是 approve 或 reject。"
+                "不要按关键词机械命中，要判断信息是否真实构成审核风险；不要编造不存在的事实。",
+            ),
+            (
+                "user",
+                json.dumps(
+                    {
+                        "message": state.get("message"),
+                        "selectedHouse": selected,
+                        "requiredChecks": checks,
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+        ],
+    )
+    if not data:
+        raise RuntimeError("模型没有返回房源合规审查 JSON")
+    return data
+
+
+def normalize_text_list(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [str(item).strip() for item in values if str(item).strip()][:8]
+
+
+def normalize_recommendation(value: Any) -> str:
+    recommendation = str(value or "").strip()
+    if recommendation not in {"approve", "reject"}:
+        raise RuntimeError(f"模型返回了不支持的合规审查建议：{recommendation or value}")
+    return recommendation
 
 
 @tool("explain_contract_risk")
@@ -1060,8 +1152,16 @@ def summarize_chat_context(state: dict[str, Any], **_: Any) -> dict[str, Any]:
     biz_type = chat.get("bizType") or selected.get("bizType") or ""
     title = chat.get("title") or selected.get("title") or "当前业务会话"
     last_message = chat.get("lastMessage") or (normalized[-1]["content"] if normalized else "")
-    confirmed = infer_confirmed_chat_facts(normalized)
-    missing = infer_missing_chat_facts(biz_type, normalized, confirmed)
+    required = required_chat_facts(biz_type)
+    fact_result = infer_chat_facts_with_llm(
+        state=state,
+        biz_type=biz_type,
+        required_facts=required,
+        messages=normalized,
+        last_message=last_message,
+    )
+    confirmed = fact_result.get("confirmedFacts") or []
+    missing = fact_result.get("missingFacts") or [item for item in required if item not in confirmed]
     summary_parts = [
         f"会话：{title}",
         f"业务类型：{biz_type or '未标记'}",
@@ -1082,6 +1182,7 @@ def summarize_chat_context(state: dict[str, Any], **_: Any) -> dict[str, Any]:
         "lastMessage": last_message,
         "confirmedFacts": confirmed,
         "missingFacts": missing,
+        "factSource": fact_result.get("source"),
         "recentMessages": normalized,
     }
 
@@ -1244,7 +1345,7 @@ def refine_with_llm_if_configured(
     api_key = os.getenv("AI_LLM_API_KEY", "")
     model = os.getenv("AI_LLM_MODEL", "")
     if not base_url or not api_key or not model:
-        return fallback
+        raise RuntimeError("AI_LLM_BASE_URL、AI_LLM_API_KEY 或 AI_LLM_MODEL 未配置，无法调用模型生成回复")
 
     system_prompt = (
         "你是智能AI房屋租赁系统的企业级租赁业务智能体。"
@@ -1265,39 +1366,38 @@ def refine_with_llm_if_configured(
         f"当前选中业务：{state.get('selected')}\n"
         f"可用 LangChain 工具：{tool_specs(TOOL_REGISTRY, tool_label, tool_description)}\n"
         f"工具结果：{compact_tool_results(tool_calls)}\n"
-        f"规则答案：{fallback}"
+        f"工具草稿：{fallback}"
     )
     messages = [
         ("system", system_prompt),
         ("user", user_prompt),
     ]
-    try:
-        langchain_answer = refine_with_langchain(
-            base_url=base_url,
-            api_key=api_key,
-            model=model,
-            messages=messages,
-            timeout=8,
-        )
-        if langchain_answer:
-            return langchain_answer
+    langchain_answer = refine_with_langchain(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        messages=messages,
+        timeout=8,
+    )
+    if langchain_answer:
+        return langchain_answer
 
-        openai_messages = [
-            {"role": role, "content": content}
-            for role, content in messages
-        ]
-        response = httpx.post(
-            f"{base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={"model": model, "messages": openai_messages, "temperature": 0.2},
-            timeout=8,
-        )
-        response.raise_for_status()
-        data = response.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content")
-        return content.strip() if content else fallback
-    except Exception:
-        return fallback
+    openai_messages = [
+        {"role": role, "content": content}
+        for role, content in messages
+    ]
+    response = httpx.post(
+        f"{base_url}/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={"model": model, "messages": openai_messages, "temperature": 0.2},
+        timeout=8,
+    )
+    response.raise_for_status()
+    data = response.json()
+    content = data.get("choices", [{}])[0].get("message", {}).get("content")
+    if not content:
+        raise RuntimeError("模型没有生成回复内容")
+    return content.strip()
 
 
 def compact_tool_results(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1363,38 +1463,78 @@ def build_next_actions(intent: str, state: dict[str, Any], tool_calls: list[dict
     return [item.get("label") for item in visible if item.get("label")][:4]
 
 
-def infer_confirmed_chat_facts(messages: list[dict[str, Any]]) -> list[str]:
-    text = "\n".join(str(item.get("content") or "") for item in messages)
-    facts = []
-    checks = [
-        ("预算", ["预算", "租金", "价格", "月租"]),
-        ("入住时间", ["入住", "搬", "起租"]),
-        ("看房时间", ["看房", "约看", "预约", "时间"]),
-        ("通勤位置", ["通勤", "地铁", "公交", "上班", "公司"]),
-        ("付款押金", ["押金", "付款", "月付", "季付"]),
-        ("合同条款", ["合同", "条款", "违约", "维修"]),
-        ("家具家电", ["家具", "家电", "空调", "冰箱", "洗衣机"]),
-        ("客户意向", ["意向", "满意", "考虑", "成交", "签"]),
-    ]
-    for label, keywords in checks:
-        if any(keyword in text for keyword in keywords):
-            facts.append(label)
-    return facts
-
-
-def infer_missing_chat_facts(
-    biz_type: str,
-    messages: list[dict[str, Any]],
-    confirmed: list[str],
-) -> list[str]:
+def required_chat_facts(biz_type: str) -> list[str]:
     required_by_type = {
         "appointment": ["看房时间", "入住时间", "预算", "通勤位置"],
         "intention": ["预算", "入住时间", "付款押金", "客户意向"],
         "contract": ["合同条款", "付款押金", "入住时间"],
         "entrust": ["看房时间", "客户意向", "合同条款"],
     }
-    required = required_by_type.get(biz_type or "", ["预算", "入住时间", "看房时间", "付款押金"])
-    return [item for item in required if item not in confirmed][:5]
+    return required_by_type.get(biz_type or "", ["预算", "入住时间", "看房时间", "付款押金"])
+
+
+def infer_chat_facts_with_llm(
+    *,
+    state: dict[str, Any],
+    biz_type: str,
+    required_facts: list[str],
+    messages: list[dict[str, Any]],
+    last_message: str,
+) -> dict[str, Any]:
+    base_url = os.getenv("AI_LLM_BASE_URL", "").rstrip("/")
+    api_key = os.getenv("AI_LLM_API_KEY", "")
+    model = os.getenv("AI_LLM_MODEL", "")
+    if not base_url or not api_key or not model:
+        raise RuntimeError("AI_LLM_BASE_URL、AI_LLM_API_KEY 或 AI_LLM_MODEL 未配置，无法调用模型抽取会话事实")
+    prompts = [
+        (
+            "system",
+            "你是租赁业务会话事实抽取智能体。"
+            "请输出 JSON，confirmedFacts 和 missingFacts 都只能从 requiredFacts 中选择。"
+            "只有会话中明确确认或强表达提到的事项才能进入 confirmedFacts；"
+            "不要靠关键词机械命中，也不要把未确认的信息当成已确认。",
+        ),
+        (
+            "user",
+            json.dumps(
+                {
+                    "userMessage": state.get("message"),
+                    "bizType": biz_type,
+                    "requiredFacts": required_facts,
+                    "messages": messages,
+                    "lastMessage": last_message,
+                },
+                ensure_ascii=False,
+            ),
+        ),
+    ]
+    data = invoke_structured_json(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        messages=prompts,
+        timeout=8,
+    )
+    if not data:
+        raise RuntimeError("模型没有返回会话事实 JSON")
+    confirmed = normalize_fact_list(data.get("confirmedFacts") or data.get("confirmed_facts") or [], required_facts)
+    missing = normalize_fact_list(data.get("missingFacts") or data.get("missing_facts") or [], required_facts)
+    if missing:
+        confirmed = normalize_fact_list([*confirmed, *[item for item in required_facts if item not in missing]], required_facts)
+    else:
+        missing = [item for item in required_facts if item not in confirmed]
+    return {
+        "confirmedFacts": confirmed,
+        "missingFacts": missing[:5],
+        "source": "llm",
+    }
+
+
+def normalize_fact_list(values: Any, allowed: list[str]) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    raw = [str(item) for item in values]
+    return [item for item in allowed if item in raw]
 
 
 def build_chat_next_actions(state: dict[str, Any], chat: dict[str, Any]) -> list[str]:

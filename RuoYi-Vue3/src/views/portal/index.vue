@@ -1794,7 +1794,16 @@ function payloadOf(response) {
 
 function applyWorkspaceRows(rows) {
   records.value = Array.isArray(rows) ? rows : []
+  ensureActiveStatusFilter()
   selected.value = filteredRecords.value[0] || records.value[0] || null
+}
+
+function ensureActiveStatusFilter() {
+  if (!filters.status) return
+  const hasMatchingStatus = records.value.some(item => String(recordStatus(item)) === String(filters.status))
+  if (!hasMatchingStatus) {
+    filters.status = ''
+  }
 }
 
 async function loadWorkspaceRows(loader, mapper = item => item) {
@@ -3322,7 +3331,7 @@ async function sendAgentMessage() {
     summarizeAiConversation(conversation.conversationId).catch(() => {})
     await loadAiConversationList()
   } catch (error) {
-    agentMessages.value.push({ role: 'assistant', content: '智能体服务暂不可用，请稍后再试。' })
+    agentMessages.value.push({ role: 'assistant', content: aiErrorMessage(error) })
   } finally {
     agentLoading.value = false
   }
@@ -3332,7 +3341,7 @@ function normalizeStoredAiMessage(message, assistantPayload) {
   const aiResult = assistantPayload ? normalizeAiResponse(assistantPayload) : null
   return {
     role: 'assistant',
-    content: message?.content || aiResult?.answer || '智能体接口已收到请求。',
+    content: message?.content || aiResult?.answer || '',
     intent: message?.intent || aiResult?.intent,
     intentLabel: message?.intentLabel || aiResult?.intentLabel,
     toolCalls: parseMaybeJson(message?.toolCalls) || aiResult?.toolCalls || [],
@@ -3372,7 +3381,7 @@ async function sendFloatingAiMessage() {
     const res = await sendPortalAiChat(buildAiRequest(content))
     floatingAiMessages.value.push(normalizeAiMessage(res))
   } catch (error) {
-    floatingAiMessages.value.push({ role: 'assistant', content: '智能体服务暂时没有返回结果，请稍后重试。当前业务页和消息沟通不受影响。' })
+    floatingAiMessages.value.push({ role: 'assistant', content: aiErrorMessage(error) })
   } finally {
     floatingAiLoading.value = false
   }
@@ -3484,7 +3493,7 @@ function normalizeAiMessage(response) {
   const aiResult = normalizeAiResponse(response)
   return {
     role: 'assistant',
-    content: aiResult.answer || '智能体接口已收到请求，等待后端返回标准化结果。',
+    content: aiResult.answer || '',
     intent: aiResult.intent,
     intentLabel: aiResult.intentLabel,
     toolCalls: aiResult.toolCalls || [],
@@ -3492,6 +3501,10 @@ function normalizeAiMessage(response) {
     suggestions: aiResult.suggestions,
     nextActions: aiResult.nextActions || []
   }
+}
+
+function aiErrorMessage(error) {
+  return error?.message || String(error || '智能体请求失败')
 }
 
 function collaborationSummary(collaboration) {

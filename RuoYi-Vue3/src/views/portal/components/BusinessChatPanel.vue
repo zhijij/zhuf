@@ -355,6 +355,9 @@ async function askAi() {
   try {
     const res = await sendPortalAiChat(buildChatAiRequest(prompt))
     applyAiResponse(res)
+  } catch (error) {
+    aiAnswer.value = error?.message || String(error || '智能体请求失败')
+    resetAiMeta()
   } finally {
     aiLoading.value = false
   }
@@ -414,7 +417,7 @@ function buildChatAiRequest(message) {
 
 function applyAiResponse(response) {
   const data = normalizeAiPayload(response)
-  aiAnswer.value = data.answer || '智能体已处理，但没有返回可展示内容。'
+  aiAnswer.value = data.answer || data.msg || ''
   aiMeta.value = {
     intent: data.intent || '',
     intentLabel: data.intentLabel || '',
@@ -422,6 +425,17 @@ function applyAiResponse(response) {
     collaboration: data.collaboration || null,
     suggestions: data.suggestions || null,
     nextActions: data.nextActions || []
+  }
+}
+
+function resetAiMeta() {
+  aiMeta.value = {
+    intent: '',
+    intentLabel: '',
+    toolCalls: [],
+    collaboration: null,
+    suggestions: null,
+    nextActions: []
   }
 }
 

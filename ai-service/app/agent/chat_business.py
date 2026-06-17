@@ -5,7 +5,7 @@ from typing import Any
 
 from app.business_rules import knowledge_reference_lines, role_style_hint
 from app.config import INTENT_LABELS
-from app.langchain_runtime import refine_with_langchain
+from app.langchain_runtime import invoke_structured_json, refine_with_langchain
 from app.tooling import call_tool
 
 
@@ -59,27 +59,6 @@ SCENE_CONFIGS = {
         "replyGoal": "确认对方诉求、缺失信息和下一步时间。",
         "replyTemplate": "您好，我已整理“{title}”的沟通信息。方便补充{missing}吗？确认后我会继续推进业务。",
     },
-}
-
-
-FACT_KEYWORDS = {
-    "预算": ["预算", "租金", "价格", "月租"],
-    "入住时间": ["入住", "搬", "起租"],
-    "看房时间": ["看房", "约看", "预约", "时间"],
-    "房源状态": ["还在", "可租", "状态", "下架"],
-    "通勤位置": ["通勤", "地铁", "公交", "上班", "公司"],
-    "付款押金": ["押金", "付款", "月付", "季付"],
-    "合同条款": ["合同", "条款", "违约", "租期"],
-    "交付清单": ["交付", "钥匙", "清单", "水电"],
-    "维修责任": ["维修", "责任", "损坏"],
-    "家具家电": ["家具", "家电", "空调", "冰箱", "洗衣机"],
-    "客户意向": ["意向", "满意", "考虑", "成交", "签"],
-    "委托范围": ["委托", "范围", "中介", "代理"],
-    "客户反馈": ["反馈", "客户", "租户"],
-    "带看节奏": ["带看", "复看", "约看"],
-    "核心诉求": ["想要", "希望", "需要", "关注"],
-    "下一步时间": ["明天", "今天", "周", "下次", "时间"],
-    "责任人": ["我来", "你来", "谁", "负责"],
 }
 
 
@@ -166,12 +145,15 @@ def chat_context_agent(state: dict[str, Any]) -> dict[str, Any]:
     text = "\n".join(item["content"] for item in messages)
     biz_type = str(chat.get("bizType") or selected.get("bizType") or "default")
     config = scene_config(biz_type)
-    confirmed = [
-        label
-        for label, keywords in FACT_KEYWORDS.items()
-        if any(keyword in text for keyword in keywords)
-    ]
-    missing = [item for item in config["requiredFacts"] if item not in confirmed]
+    fact_result = infer_chat_facts_with_llm(
+        state=state,
+        biz_type=biz_type,
+        required_facts=config["requiredFacts"],
+        messages=messages,
+        last_message=chat.get("lastMessage") or (messages[-1]["content"] if messages else ""),
+    )
+    confirmed = fact_result.get("confirmedFacts") or []
+    missing = fact_result.get("missingFacts") or [item for item in config["requiredFacts"] if item not in confirmed]
     last_message = chat.get("lastMessage") or (messages[-1]["content"] if messages else "")
     summary = [
         f"会话：{chat.get('title') or selected.get('title') or '当前业务会话'}",
@@ -195,8 +177,73 @@ def chat_context_agent(state: dict[str, Any]) -> dict[str, Any]:
         "lastMessage": last_message,
         "confirmedFacts": confirmed,
         "missingFacts": missing,
+        "factSource": fact_result.get("source") or "llm",
         "recentMessages": messages,
     }
+
+
+def infer_chat_facts_with_llm(
+    *,
+    state: dict[str, Any],
+    biz_type: str,
+    required_facts: list[str],
+    messages: list[dict[str, Any]],
+    last_message: str,
+) -> dict[str, Any]:
+    base_url = os.getenv("AI_LLM_BASE_URL", "").rstrip("/")
+    api_key = os.getenv("AI_LLM_API_KEY", "")
+    model = os.getenv("AI_LLM_MODEL", "")
+    if not base_url or not api_key or not model:
+        raise RuntimeError("AI_LLM_BASE_URL、AI_LLM_API_KEY 或 AI_LLM_MODEL 未配置，无法调用模型抽取会话事实")
+    prompt = [
+        (
+            "system",
+            "你是租赁业务会话事实抽取智能体。"
+            "请基于会话真实内容输出 JSON。"
+            "confirmedFacts 只能包含 requiredFacts 中已经被明确确认或强表达提到的事项；"
+            "missingFacts 只能包含 requiredFacts 中仍需追问的事项。"
+            "不要按关键词机械命中，也不要把未确认的信息当成已确认。",
+        ),
+        (
+            "user",
+            json.dumps(
+                {
+                    "userMessage": state.get("message"),
+                    "bizType": biz_type,
+                    "requiredFacts": required_facts,
+                    "messages": messages,
+                    "lastMessage": last_message,
+                },
+                ensure_ascii=False,
+            ),
+        ),
+    ]
+    data = invoke_structured_json(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        messages=prompt,
+        timeout=8,
+    )
+    if not data:
+        raise RuntimeError("模型没有返回会话事实 JSON")
+    confirmed = normalize_fact_list(data.get("confirmedFacts") or data.get("confirmed_facts") or [], required_facts)
+    missing = normalize_fact_list(data.get("missingFacts") or data.get("missing_facts") or [], required_facts)
+    if missing:
+        confirmed = normalize_fact_list([*confirmed, *[item for item in required_facts if item not in missing]], required_facts)
+    else:
+        missing = [item for item in required_facts if item not in confirmed]
+    return {
+        "confirmedFacts": confirmed,
+        "missingFacts": missing,
+        "source": "llm",
+    }
+
+
+def normalize_fact_list(values: Any, allowed: list[str]) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [item for item in allowed if item in [str(value) for value in values]]
 
 
 def business_stage_agent(
@@ -256,11 +303,13 @@ def reply_agent(
 ) -> dict[str, Any]:
     draft = default_reply(chat_context, stage)
     llm_message = refine_reply_with_llm(state, chat_context, stage, knowledge, draft)
-    message = llm_message or draft
+    if not llm_message:
+        raise RuntimeError("模型没有生成业务会话回复")
+    message = llm_message
     return {
         "summary": message,
         "message": message,
-        "source": "llm" if llm_message else "structured-draft",
+        "source": "llm",
         "draft": draft,
     }
 
@@ -351,7 +400,7 @@ def refine_reply_with_llm(
     api_key = os.getenv("AI_LLM_API_KEY", "")
     model = os.getenv("AI_LLM_MODEL", "")
     if not base_url or not api_key or not model:
-        return None
+        raise RuntimeError("AI_LLM_BASE_URL、AI_LLM_API_KEY 或 AI_LLM_MODEL 未配置，无法调用模型生成业务会话回复")
 
     messages = [
         (
@@ -378,16 +427,13 @@ def refine_reply_with_llm(
             ),
         ),
     ]
-    try:
-        return refine_with_langchain(
-            base_url=base_url,
-            api_key=api_key,
-            model=model,
-            messages=messages,
-            timeout=8,
-        )
-    except Exception:
-        return None
+    return refine_with_langchain(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        messages=messages,
+        timeout=8,
+    )
 
 
 def build_knowledge_query(
@@ -412,19 +458,40 @@ def infer_chat_risks(
     chat_context: dict[str, Any],
     stage: dict[str, Any],
 ) -> list[str]:
-    risks = []
-    missing = chat_context.get("missingFacts") or []
-    if missing:
-        risks.append("关键字段未确认：" + "、".join(missing[:3]))
-    last_message = str(chat_context.get("lastMessage") or "")
-    risk_keywords = {
-        "押金": "涉及押金时需要确认退还条件和扣除标准",
-        "合同": "涉及合同时需要核对租期、金额、维修责任和违约责任",
-        "转账": "涉及转账时避免脱离平台私下付款",
-        "马上": "对方要求快速推进时仍需保留确认记录",
-    }
-    risks.extend(message for keyword, message in risk_keywords.items() if keyword in last_message)
-    return list(dict.fromkeys(risks))[:5]
+    return infer_chat_risks_with_llm(chat_context, stage)
+
+
+def infer_chat_risks_with_llm(chat_context: dict[str, Any], stage: dict[str, Any]) -> list[str]:
+    base_url = os.getenv("AI_LLM_BASE_URL", "").rstrip("/")
+    api_key = os.getenv("AI_LLM_API_KEY", "")
+    model = os.getenv("AI_LLM_MODEL", "")
+    if not base_url or not api_key or not model:
+        raise RuntimeError("AI_LLM_BASE_URL、AI_LLM_API_KEY 或 AI_LLM_MODEL 未配置，无法调用模型判断沟通风险")
+    messages = [
+        (
+            "system",
+            "你是租赁沟通风险判断智能体。"
+            "请输出 JSON：risks 为字符串数组。"
+            "只基于会话和业务阶段判断，不按关键词机械命中，不编造未出现的事实。",
+        ),
+        (
+            "user",
+            json.dumps({"chatContext": chat_context, "stage": stage}, ensure_ascii=False),
+        ),
+    ]
+    data = invoke_structured_json(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        messages=messages,
+        timeout=8,
+    )
+    if not data:
+        raise RuntimeError("模型没有返回沟通风险 JSON")
+    risks = data.get("risks") or []
+    if not isinstance(risks, list):
+        return []
+    return [str(item) for item in risks if str(item).strip()][:5]
 
 
 def expert_result(name: str, label: str, output: dict[str, Any]) -> dict[str, Any]:

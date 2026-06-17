@@ -11,13 +11,25 @@ from app.agent.rag.retriever import rag_prefetch as run_rag_prefetch
 from app.agent.state import TenantAgentState
 from app.agent.tools import amap
 from app.agent.tools.rental_business import get_contract, get_house_map_context, save_long_term_memory, search_amap_around, search_houses
-from app.business_rules import as_int, extract_budget, extract_city, knowledge_match_line
-from app.config import INTENT_LABELS
+from app.business_rules import as_int, knowledge_match_line
+from app.config import INTENT_LABELS, KNOWLEDGE_SOURCE_TYPES
 from app.langchain_runtime import invoke_structured_json, refine_with_langchain
 from app.skill_registry import select_skill, skill_to_dict
 
 _COMPILED_GRAPH = None
 _CHECKPOINTER = get_checkpointer()
+TENANT_INTENTS = {
+    "smalltalk",
+    "correction",
+    "house_recommend",
+    "contract_risk",
+    "knowledge_answer",
+    "record_summary",
+    "context_answer",
+}
+TENANT_ROUTES = {"smalltalk", "slot_filling", "collaboration", "retrieval_executor"}
+TENANT_EXPERTS = {"house_search_specialist", "map_life_specialist", "risk_analysis_specialist"}
+NEARBY_FOCUS_VALUES = {"education", "transport", "medical", "life"}
 
 
 class TenantRoute(BaseModel):
@@ -25,6 +37,8 @@ class TenantRoute(BaseModel):
     route: str = Field(default="collaboration")
     slots: dict[str, Any] = Field(default_factory=dict)
     missing_slots: list[str] = Field(default_factory=list)
+    experts: list[str] = Field(default_factory=list)
+    source_types: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.7)
 
 
@@ -90,67 +104,42 @@ def get_graph():
 
 
 def build_graph():
-    try:
-        from langgraph.graph import END, StateGraph
+    from langgraph.graph import END, StateGraph
 
-        builder = StateGraph(TenantAgentState)
-        builder.add_node("rag_prefetch", rag_prefetch)
-        builder.add_node("router", router)
-        builder.add_node("coordinator", coordinator)
-        builder.add_node("llm_unconfigured", llm_unconfigured)
-        builder.add_node("smalltalk", smalltalk)
-        builder.add_node("slot_filling", slot_filling)
-        builder.add_node("collaboration", collaboration)
-        builder.add_node("retrieval_executor", retrieval_executor)
-        builder.add_node("analyst", analyst)
-        builder.add_node("synthesis", synthesis)
-        builder.add_node("persist_memory", persist_memory)
-        builder.set_entry_point("rag_prefetch")
-        builder.add_edge("rag_prefetch", "router")
-        builder.add_edge("router", "coordinator")
-        builder.add_conditional_edges(
-            "coordinator",
-            route_after_coordinator,
-            {
-                "llm_unconfigured": "llm_unconfigured",
-                "smalltalk": "smalltalk",
-                "slot_filling": "slot_filling",
-                "collaboration": "collaboration",
-                "retrieval_executor": "retrieval_executor",
-            },
-        )
-        builder.add_edge("llm_unconfigured", "synthesis")
-        builder.add_edge("smalltalk", "synthesis")
-        builder.add_edge("slot_filling", "synthesis")
-        builder.add_edge("collaboration", "synthesis")
-        builder.add_edge("retrieval_executor", "analyst")
-        builder.add_edge("analyst", "synthesis")
-        builder.add_edge("synthesis", "persist_memory")
-        builder.add_edge("persist_memory", END)
-        if _CHECKPOINTER is not None:
-            return builder.compile(checkpointer=_CHECKPOINTER)
-        return builder.compile()
-    except Exception:
-        return FallbackGraph()
-
-
-class FallbackGraph:
-    def invoke(self, state: TenantAgentState, config: dict[str, Any] | None = None) -> TenantAgentState:
-        state = reset_turn_state(state)
-        state = rag_prefetch(state)
-        state = router(state)
-        state = coordinator(state)
-        next_node = route_after_coordinator(state)
-        flow = {
-            "llm_unconfigured": [llm_unconfigured],
-            "smalltalk": [smalltalk],
-            "slot_filling": [slot_filling],
-            "retrieval_executor": [retrieval_executor, analyst],
-            "collaboration": [collaboration],
-        }.get(next_node, [collaboration])
-        for node in [*flow, synthesis, persist_memory]:
-            state = node(state)
-        return state
+    builder = StateGraph(TenantAgentState)
+    builder.add_node("rag_prefetch", rag_prefetch)
+    builder.add_node("router", router)
+    builder.add_node("coordinator", coordinator)
+    builder.add_node("smalltalk", smalltalk)
+    builder.add_node("slot_filling", slot_filling)
+    builder.add_node("collaboration", collaboration)
+    builder.add_node("retrieval_executor", retrieval_executor)
+    builder.add_node("analyst", analyst)
+    builder.add_node("synthesis", synthesis)
+    builder.add_node("persist_memory", persist_memory)
+    builder.set_entry_point("rag_prefetch")
+    builder.add_edge("rag_prefetch", "router")
+    builder.add_edge("router", "coordinator")
+    builder.add_conditional_edges(
+        "coordinator",
+        route_after_coordinator,
+        {
+            "smalltalk": "smalltalk",
+            "slot_filling": "slot_filling",
+            "collaboration": "collaboration",
+            "retrieval_executor": "retrieval_executor",
+        },
+    )
+    builder.add_edge("smalltalk", "synthesis")
+    builder.add_edge("slot_filling", "synthesis")
+    builder.add_edge("collaboration", "synthesis")
+    builder.add_edge("retrieval_executor", "analyst")
+    builder.add_edge("analyst", "synthesis")
+    builder.add_edge("synthesis", "persist_memory")
+    builder.add_edge("persist_memory", END)
+    if _CHECKPOINTER is not None:
+        return builder.compile(checkpointer=_CHECKPOINTER)
+    return builder.compile()
 
 
 def rag_prefetch(state: TenantAgentState) -> TenantAgentState:
@@ -172,177 +161,130 @@ def router(state: TenantAgentState) -> TenantAgentState:
 
 def structured_route(state: TenantAgentState) -> dict[str, Any]:
     llm_route = llm_route_decision(state)
-    if llm_route:
-        return normalize_route(llm_route, state)
-
-    message = state["message"]
-    slots = infer_route_slots(state)
-    text = message.lower()
-    if is_record_summary_query(text):
-        return TenantRoute(intent="context_answer", route="retrieval_executor", slots=slots, confidence=0.86).model_dump()
-    if is_contract_knowledge_query(text, slots):
-        return TenantRoute(intent="knowledge_answer", route="retrieval_executor", slots=slots, confidence=0.84).model_dump()
-    if not message.strip():
-        route = TenantRoute(intent="smalltalk", route="smalltalk", slots=slots, confidence=0.8)
-    elif any(word in text for word in ["你好", "在吗", "谢谢"]):
-        route = TenantRoute(intent="smalltalk", route="smalltalk", slots=slots, confidence=0.85)
-    elif any(word in text for word in ["不对", "不对吧", "不太对", "不准确", "不是这个", "你理解错了", "重新来", "重说", "纠正一下", "不用"]):
-        route = TenantRoute(intent="correction", route="smalltalk", slots=slots, confidence=0.95)
-    elif any(word in text for word in ["合同", "押金", "违约", "风险"]):
-        route = TenantRoute(intent="contract_risk", route="collaboration", slots=slots, confidence=0.86)
-    elif is_nearby_query(text) and slots.get("houseId"):
-        route = TenantRoute(intent="context_answer", route="collaboration", slots=slots, confidence=0.82)
-    elif is_house_search_query(text):
-        missing = []
-        if not slots["city"] and any(word in text for word in ["推荐", "找房"]):
-            missing.append("city")
-        route = TenantRoute(intent="house_recommend", route="slot_filling" if missing else "collaboration", slots=slots, missing_slots=missing, confidence=0.9)
-    elif any(word in text for word in ["政策", "规则", "流程", "知识", "faq"]):
-        route = TenantRoute(intent="knowledge_answer", route="retrieval_executor", slots=slots, confidence=0.78)
-    else:
-        route = TenantRoute(intent="context_answer", route="collaboration", slots=slots, confidence=0.68)
-    return route.model_dump()
+    if not llm_route:
+        raise RuntimeError("模型没有返回租户智能体路由 JSON")
+    return normalize_route(llm_route, state)
 
 
 def normalize_route(route: dict[str, Any], state: TenantAgentState) -> dict[str, Any]:
-    message = state["message"]
-    text = message.lower()
     inferred_slots = infer_route_slots(state)
     llm_slots = {
         key: value
         for key, value in (route.get("slots") or {}).items()
         if value not in (None, "")
     }
-    slots = {**inferred_slots, **llm_slots}
-    intent = str(route.get("intent") or "context_answer")
-    route_name = str(route.get("route") or "collaboration")
-    missing_slots = list(route.get("missing_slots") or [])
-    confidence = float(route.get("confidence") or 0.75)
+    slots = merge_route_slots(inferred_slots, llm_slots)
+    intent = normalize_intent(route.get("intent"))
+    route_name = normalize_route_name(route.get("route"), intent)
+    missing_slots = normalize_missing_slots(route.get("missing_slots") or [], slots)
+    experts = normalize_experts(route.get("experts") or slots.get("experts") or [])
+    source_types = normalize_source_types(route.get("source_types") or route.get("sourceTypes") or slots.get("sourceTypes") or [])
+    confidence = safe_float(route.get("confidence"), 0.75)
 
-    if is_record_summary_query(text):
-        return TenantRoute(
-            intent="context_answer",
-            route="retrieval_executor",
-            slots=slots,
-            missing_slots=[],
-            confidence=confidence,
-        ).model_dump()
-    if is_contract_knowledge_query(text, slots):
-        return TenantRoute(
-            intent="knowledge_answer",
-            route="retrieval_executor",
-            slots=slots,
-            missing_slots=[],
-            confidence=confidence,
-        ).model_dump()
-
-    if any(word in text for word in ["不对", "不对吧", "不太对", "不准确", "不是这个", "你理解错了", "重新来", "重说", "纠正一下", "不用"]):
-        intent = "correction"
-        route_name = "smalltalk"
-        missing_slots = []
-    elif any(word in text for word in ["合同", "押金", "违约", "风险"]):
-        intent = "contract_risk"
+    if intent == "house_recommend" and not missing_slots:
         route_name = "collaboration"
-        missing_slots = []
-    elif is_nearby_query(text) and slots.get("houseId"):
-        intent = "context_answer"
+    if experts and not missing_slots and route_name != "smalltalk":
         route_name = "collaboration"
-        missing_slots = []
-    elif is_house_search_query(text):
-        intent = "house_recommend"
-        route_name = "collaboration"
-        if not slots.get("city") and any(word in text for word in ["推荐", "找房"]):
-            missing_slots = ["city"]
-            route_name = "slot_filling"
-        else:
-            missing_slots = [item for item in missing_slots if item != "city"]
 
     return TenantRoute(
         intent=intent,
         route=route_name,
         slots=slots,
         missing_slots=missing_slots,
+        experts=experts,
+        source_types=source_types,
         confidence=confidence,
     ).model_dump()
 
 
 def infer_route_slots(state: TenantAgentState) -> dict[str, Any]:
-    message = state["message"]
     context = state.get("context") or {}
     selected = context.get("selected") or {}
     filters = context.get("filters") or {}
     recommend = state.get("recommend") or {}
-    city = (
-        extract_city(message)
-        or match_context_city(message, selected, filters, recommend)
-        or recommend.get("city")
-        or filters.get("city")
-        or selected.get("city")
-    )
     return {
-        "city": city,
-        "district": filters.get("district") or selected.get("district"),
-        "maxRent": extract_budget(message) or recommend.get("maxRent"),
+        "city": recommend.get("city") or filters.get("city"),
+        "district": filters.get("district"),
+        "maxRent": recommend.get("maxRent") or filters.get("maxRent"),
         "houseId": selected.get("houseId"),
         "contractId": selected.get("contractId"),
-        "nearbyFocus": nearby_focus(message),
+        "selectedCity": selected.get("city"),
+        "selectedDistrict": selected.get("district"),
     }
 
 
-def match_context_city(
-    message: str,
-    selected: dict[str, Any],
-    filters: dict[str, Any],
-    recommend: dict[str, Any],
-) -> str | None:
-    text = message or ""
-    for source in [selected, filters, recommend]:
-        city = str(source.get("city") or "").strip()
-        if not city:
+def merge_route_slots(inferred_slots: dict[str, Any], llm_slots: dict[str, Any]) -> dict[str, Any]:
+    slots = {**inferred_slots}
+    for key in ["city", "district", "maxRent"]:
+        value = llm_slots.get(key)
+        if value not in (None, ""):
+            slots[key] = value
+    for key, value in llm_slots.items():
+        if key not in slots and value not in (None, ""):
+            slots[key] = value
+    return normalize_route_slots(slots)
+
+
+def normalize_route_slots(slots: dict[str, Any]) -> dict[str, Any]:
+    normalized = {key: value for key, value in slots.items() if value not in (None, "")}
+    focus = normalized.get("nearbyFocus") or normalized.get("nearby_focus")
+    if focus in NEARBY_FOCUS_VALUES:
+        normalized["nearbyFocus"] = focus
+    else:
+        normalized.pop("nearbyFocus", None)
+        normalized.pop("nearby_focus", None)
+    return normalized
+
+
+def normalize_intent(value: Any) -> str:
+    intent = str(value or "context_answer").strip()
+    if intent == "record_summary":
+        return "context_answer"
+    return intent if intent in TENANT_INTENTS else "context_answer"
+
+
+def normalize_route_name(value: Any, intent: str) -> str:
+    route = str(value or "").strip()
+    if route in TENANT_ROUTES:
+        return route
+    if intent in {"smalltalk", "correction"}:
+        return "smalltalk"
+    if intent == "knowledge_answer":
+        return "retrieval_executor"
+    return "collaboration"
+
+
+def normalize_experts(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return unique_ordered([str(item) for item in values if str(item) in TENANT_EXPERTS])
+
+
+def normalize_source_types(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return unique_ordered([str(item) for item in values if str(item) in KNOWLEDGE_SOURCE_TYPES])
+
+
+def safe_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_missing_slots(missing_slots: list[str], slots: dict[str, Any]) -> list[str]:
+    normalized = []
+    if not isinstance(missing_slots, list):
+        return normalized
+    for item in missing_slots:
+        if item != "city":
             continue
-        aliases = {city, city.removesuffix("市")}
-        if any(alias and alias in text for alias in aliases):
-            return city
-    return None
-
-
-def is_house_search_query(text: str) -> bool:
-    return any(word in text for word in [
-        "推荐", "找房", "房源", "可租", "有房", "有没有房", "预算", "地铁", "通勤", "整租", "合租",
-    ])
-
-
-def is_nearby_query(text: str) -> bool:
-    return any(word in text for word in [
-        "周围", "周边", "附近", "旁边", "学校", "学区", "幼儿园", "小学", "中学",
-        "医院", "地铁", "公交", "商超", "超市", "配套", "通勤",
-    ])
-
-
-def is_record_summary_query(text: str) -> bool:
-    return any(word in text for word in [
-        "总结", "摘要", "当前业务", "业务进度", "进度", "梳理", "当前记录",
-    ])
-
-
-def is_contract_knowledge_query(text: str, slots: dict[str, Any]) -> bool:
-    if slots.get("contractId"):
-        return False
-    has_contract_topic = any(word in text for word in ["押金", "合同", "签约", "违约", "退还", "条款"])
-    asks_rule = any(word in text for word in ["规则", "是什么", "怎么", "如何", "怎么办", "说明", "解释"])
-    return has_contract_topic and asks_rule
-
-
-def nearby_focus(message: str) -> str | None:
-    if any(word in message for word in ["学校", "学区", "幼儿园", "小学", "中学"]):
-        return "education"
-    if any(word in message for word in ["地铁", "公交", "通勤"]):
-        return "transport"
-    if any(word in message for word in ["医院", "药店"]):
-        return "medical"
-    if any(word in message for word in ["商超", "超市", "商场", "菜场"]):
-        return "life"
-    return None
+        if slots.get("city"):
+            continue
+        if item not in normalized:
+            normalized.append(item)
+    return normalized
 
 
 def should_prefetch_rag(state: TenantAgentState) -> bool:
@@ -355,15 +297,14 @@ def should_prefetch_rag(state: TenantAgentState) -> bool:
 
 
 def infer_rag_source_types(state: TenantAgentState) -> list[str]:
-    intent = (state.get("route") or {}).get("intent")
-    message = str(state.get("message") or "")
+    route = state.get("route") or {}
+    source_types = normalize_source_types(route.get("source_types") or route.get("sourceTypes") or [])
+    if source_types:
+        return source_types
+    intent = route.get("intent")
     if intent == "contract_risk":
         return ["contract", "policy", "faq"]
     if intent == "knowledge_answer":
-        if any(word in message for word in ["合同", "押金", "违约", "签约"]):
-            return ["contract", "policy", "faq"]
-        if any(word in message for word in ["流程", "政策", "规则", "制度", "看房"]):
-            return ["faq", "policy", "enterprise", "contract"]
         return ["faq", "policy", "enterprise", "chat"]
     if intent == "house_recommend":
         return ["faq", "policy", "contract"]
@@ -388,7 +329,7 @@ def llm_route_decision(state: TenantAgentState) -> dict[str, Any] | None:
     api_key = os.getenv("AI_LLM_API_KEY", "")
     model = os.getenv("AI_LLM_MODEL", "")
     if not base_url or not api_key or not model:
-        return None
+        raise RuntimeError("AI_LLM_BASE_URL、AI_LLM_API_KEY 或 AI_LLM_MODEL 未配置，无法调用模型判断租户路由")
 
     message = state["message"]
     selected = (state.get("context") or {}).get("selected") or {}
@@ -397,16 +338,31 @@ def llm_route_decision(state: TenantAgentState) -> dict[str, Any] | None:
     messages = [
         ("system",
          "你是租户智能体的路由器。"
-         "请根据用户消息和上下文，输出 JSON。"
+         "请根据用户消息、最近对话和当前业务上下文，输出 JSON。"
          "只允许 intent 为 smalltalk, correction, house_recommend, contract_risk, knowledge_answer, context_answer。"
          "只允许 route 为 smalltalk, slot_filling, collaboration, retrieval_executor。"
-         "如果是找房但缺少城市，可给 missing_slots=[\"city\"]。"),
+         "必须输出 slots 对象，可包含 city、district、maxRent、nearbyFocus。"
+         "nearbyFocus 只允许 education, transport, medical, life，无法判断就省略。"
+         "必须输出 experts 数组，只允许 house_search_specialist, map_life_specialist, risk_analysis_specialist。"
+         "需要查房源时放 house_search_specialist；需要周边/学校/交通/医疗/生活配套时放 map_life_specialist；需要合同风险时放 risk_analysis_specialist。"
+         "只要 experts 非空，route 应为 collaboration；知识库问答且不需要专家时，route 才用 retrieval_executor。"
+         "用户围绕当前/这个/这套房源问周边、附近、学校、交通、医院或生活配套时，intent 应为 context_answer，experts 应包含 map_life_specialist。"
+         "如果用户当前消息只是城市、区县、板块或区域名（例如“海淀”“朝阳区”“浦东有吗”），应理解为更新找房区域，intent=house_recommend，experts=[\"house_search_specialist\"]。"
+         "不要把上一轮的周边/学校/交通意图自动延续到新的城市或区县名；只有当前消息明确询问周围、附近、配套、学校、医院、地铁等，才派 map_life_specialist。"
+         "可以输出 source_types 数组，只允许 house, contract, policy, faq, chat, enterprise，用于知识库检索范围。"
+         "城市/区县判断交给你：如果用户说“有北京的没”，slots.city 应为“北京”；"
+         "如果用户接着只说“海淀”，应结合最近对话判断为北京海淀，slots.city='北京', slots.district='海淀区'。"
+         "不要因为当前选中房源在延安市，就把用户新问的城市或区县改回延安市/宝塔区。"
+         "只有用户确实在找房且无法从消息或最近对话判断城市时，才给 missing_slots=[\"city\"]。"
+         "不要输出 budget 这类未支持缺槽；预算缺失不是阻塞找房。"),
         ("user",
          json.dumps({
              "message": message,
+             "recentMemory": compact_memory(state.get("memory") or []),
              "selected": selected,
              "filters": filters,
              "recommend": recommend,
+             "inferredSlots": infer_route_slots(state),
          }, ensure_ascii=False))
     ]
     data = invoke_structured_json(
@@ -417,33 +373,37 @@ def llm_route_decision(state: TenantAgentState) -> dict[str, Any] | None:
         timeout=8,
     )
     if not data:
-        return None
-    try:
-        route = TenantRoute(
-            intent=str(data.get("intent") or "context_answer"),
-            route=str(data.get("route") or "collaboration"),
-            slots=data.get("slots") if isinstance(data.get("slots"), dict) else {},
-            missing_slots=data.get("missing_slots") if isinstance(data.get("missing_slots"), list) else [],
-            confidence=float(data.get("confidence") or 0.75),
-        )
-        return route.model_dump()
-    except Exception:
-        return None
+        raise RuntimeError("模型没有返回租户智能体路由 JSON")
+    route = TenantRoute(
+        intent=str(data.get("intent") or "context_answer"),
+        route=str(data.get("route") or "collaboration"),
+        slots=data.get("slots") if isinstance(data.get("slots"), dict) else {},
+        missing_slots=data.get("missing_slots") if isinstance(data.get("missing_slots"), list) else [],
+        experts=normalize_experts(data.get("experts") or []),
+        source_types=normalize_source_types(data.get("source_types") or data.get("sourceTypes") or []),
+        confidence=safe_float(data.get("confidence"), 0.75),
+    )
+    return route.model_dump()
 
 
 def coordinator(state: TenantAgentState) -> TenantAgentState:
     state["checkpoints"].append("coordinator")
     if should_prefetch_rag(state):
         state = ensure_rag_loaded(state)
-    llm_plan = llm_coordinator_plan(state)
-    if llm_plan:
-        ensure_required_experts(state, llm_plan)
-        state["coordinator"] = llm_plan
-        return state
-
     route = state.get("route") or {}
-    experts = required_experts_for_state(state)
-    state["coordinator"] = {
+    route_experts = normalize_experts(route.get("experts") or [])
+    if route_experts:
+        state["coordinator"] = build_coordinator_payload(route_experts, reason="router-ai-experts")
+        return state
+    llm_plan = llm_coordinator_plan(state)
+    if not llm_plan:
+        raise RuntimeError("模型没有返回租户智能体主管规划 JSON")
+    state["coordinator"] = llm_plan
+    return state
+
+
+def build_coordinator_payload(experts: list[str], reason: str = "") -> dict[str, Any]:
+    return {
         "agent": "coordinator",
         "toolPlan": ["search_houses", "vector_search", "amap_search_poi"],
         "confirmationPolicy": {
@@ -454,18 +414,14 @@ def coordinator(state: TenantAgentState) -> TenantAgentState:
             "parallel": bool(experts),
             "experts": experts,
         },
+        "reason": reason,
     }
-    return state
 
 
 def ensure_required_experts(state: TenantAgentState, plan: dict[str, Any]) -> None:
     collaboration_plan = plan.setdefault("collaborationPlan", {})
     required = required_experts_for_state(state)
-    current = [
-        item
-        for item in (collaboration_plan.get("experts") or [])
-        if item in required
-    ]
+    current = normalize_experts(collaboration_plan.get("experts") or [])
     merged = unique_ordered([*required, *current])
     collaboration_plan["experts"] = merged
     collaboration_plan["parallel"] = bool(merged)
@@ -473,20 +429,17 @@ def ensure_required_experts(state: TenantAgentState, plan: dict[str, Any]) -> No
 
 def required_experts_for_state(state: TenantAgentState) -> list[str]:
     route = state.get("route") or {}
+    route_experts = normalize_experts(route.get("experts") or [])
+    if route_experts:
+        return route_experts
     intent = route.get("intent")
-    text = str(state.get("message") or "").lower()
     if intent == "knowledge_answer":
         return []
     if intent == "contract_risk":
         return ["risk_analysis_specialist"]
-    experts: list[str] = []
-    if intent == "house_recommend" or is_house_search_query(text):
-        experts.append("house_search_specialist")
-    if is_nearby_query(text):
-        experts.append("map_life_specialist")
-    if intent == "house_recommend" and any(word in text for word in ["合同", "押金", "风险", "签约"]):
-        experts.append("risk_analysis_specialist")
-    return unique_ordered(experts)
+    if intent == "house_recommend":
+        return ["house_search_specialist"]
+    return []
 
 
 def unique_ordered(items: list[str]) -> list[str]:
@@ -502,7 +455,7 @@ def llm_coordinator_plan(state: TenantAgentState) -> dict[str, Any] | None:
     api_key = os.getenv("AI_LLM_API_KEY", "")
     model = os.getenv("AI_LLM_MODEL", "")
     if not base_url or not api_key or not model:
-        return None
+        raise RuntimeError("AI_LLM_BASE_URL、AI_LLM_API_KEY 或 AI_LLM_MODEL 未配置，无法调用模型规划租户智能体")
 
     route = state.get("route") or {}
     messages = [
@@ -527,51 +480,41 @@ def llm_coordinator_plan(state: TenantAgentState) -> dict[str, Any] | None:
         timeout=8,
     )
     if not data:
-        return None
-    try:
-        plan = TenantCoordinatorPlan(
-            route=str(data.get("route") or route.get("route") or "collaboration"),
-            experts=[str(item) for item in (data.get("experts") or []) if item],
-            tool_plan=[str(item) for item in (data.get("tool_plan") or []) if item],
-            ask_user=[str(item) for item in (data.get("ask_user") or []) if item],
-            reason=str(data.get("reason") or ""),
-        )
-        return {
-            "agent": "coordinator",
-            "toolPlan": plan.tool_plan or ["search_houses", "vector_search", "amap_search_poi"],
-            "confirmationPolicy": {
-                "mediumHighRiskRequiresConfirmed": True,
-                "destructiveActionsDeniedByDefault": True,
-            },
-            "collaborationPlan": {
-                "parallel": bool(plan.experts),
-                "experts": plan.experts,
-            },
-            "askUser": plan.ask_user,
-            "reason": plan.reason,
-        }
-    except Exception:
-        return None
+        raise RuntimeError("模型没有返回租户智能体主管规划 JSON")
+    plan = TenantCoordinatorPlan(
+        route=str(data.get("route") or route.get("route") or "collaboration"),
+        experts=[str(item) for item in (data.get("experts") or []) if item],
+        tool_plan=[str(item) for item in (data.get("tool_plan") or []) if item],
+        ask_user=[str(item) for item in (data.get("ask_user") or []) if item],
+        reason=str(data.get("reason") or ""),
+    )
+    return {
+        "agent": "coordinator",
+        "toolPlan": plan.tool_plan,
+        "confirmationPolicy": {
+            "mediumHighRiskRequiresConfirmed": True,
+            "destructiveActionsDeniedByDefault": True,
+        },
+        "collaborationPlan": {
+            "parallel": bool(plan.experts),
+            "experts": normalize_experts(plan.experts),
+        },
+        "askUser": plan.ask_user,
+        "reason": plan.reason,
+    }
 
 
-def route_after_coordinator(state: TenantAgentState) -> Literal["llm_unconfigured", "smalltalk", "slot_filling", "collaboration", "retrieval_executor"]:
+def route_after_coordinator(state: TenantAgentState) -> Literal["smalltalk", "slot_filling", "collaboration", "retrieval_executor"]:
     route = state.get("route") or {}
     if route.get("route") == "smalltalk":
         return "smalltalk"
     if route.get("missing_slots"):
         return "slot_filling"
+    if (state.get("coordinator") or {}).get("collaborationPlan", {}).get("experts"):
+        return "collaboration"
     if route.get("route") == "retrieval_executor":
         return "retrieval_executor"
-    if not (state.get("coordinator") or {}).get("collaborationPlan", {}).get("experts"):
-        return "retrieval_executor"
-    return "collaboration"
-
-
-def llm_unconfigured(state: TenantAgentState) -> TenantAgentState:
-    state["checkpoints"].append("llm_unconfigured")
-    state["analysis"] = {"summary": "大模型未配置，已使用规则和工具结果生成回复。"}
-    return state
-
+    return "retrieval_executor"
 
 def smalltalk(state: TenantAgentState) -> TenantAgentState:
     state["checkpoints"].append("smalltalk")
@@ -683,10 +626,11 @@ def house_search_specialist(state: TenantAgentState) -> dict[str, Any]:
     slots = (state.get("route") or {}).get("slots") or {}
     result = search_houses(
         to_tool_state(state),
-        query=state["message"],
+        query=house_search_query(state, slots),
         city=slots.get("city"),
         max_rent=as_int(slots.get("maxRent")),
     )
+    result = filter_house_result_by_slots(result, slots)
     matches = result.get("matches") or result.get("rows") or result.get("items") or []
     summary = "房源检索专家未命中房源。"
     if matches:
@@ -700,6 +644,28 @@ def house_search_specialist(state: TenantAgentState) -> dict[str, Any]:
         "output": result,
         "toolCalls": [tool_call("search_houses", "查询业务房源", result)],
     }
+
+
+def filter_house_result_by_slots(result: dict[str, Any], slots: dict[str, Any]) -> dict[str, Any]:
+    filtered = {**(result or {})}
+    for key in ["matches", "rows", "items"]:
+        values = filtered.get(key)
+        if isinstance(values, list):
+            filtered[key] = [item for item in values if isinstance(item, dict) and house_matches_slots(item, slots)]
+    matches = filtered.get("matches") or filtered.get("rows") or filtered.get("items") or []
+    place = " ".join(str(item) for item in [slots.get("city"), slots.get("district")] if item)
+    filtered["summary"] = f"查询到 {len(matches)} 套{place + ' ' if place else ''}匹配房源"
+    filtered["success"] = result.get("success", True) if isinstance(result, dict) else True
+    return filtered
+
+
+def house_search_query(state: TenantAgentState, slots: dict[str, Any]) -> str:
+    parts = [
+        slots.get("city"),
+        slots.get("district"),
+        state.get("message"),
+    ]
+    return " ".join(str(item).strip() for item in parts if item)
 
 
 def map_life_specialist(state: TenantAgentState) -> dict[str, Any]:
@@ -739,40 +705,12 @@ def map_life_specialist(state: TenantAgentState) -> dict[str, Any]:
 def analyze_map_life_context(state: TenantAgentState, result: dict[str, Any]) -> dict[str, Any]:
     evidence = compact_map_evidence(result)
     llm_text = llm_map_life_analysis(state, evidence)
-    if llm_text:
-        return {
-            "summary": llm_text,
-            "evidence": evidence,
-            "source": "llm",
-        }
-
-    highlights = evidence.get("highlights") or []
-    totals = evidence.get("totals") or {}
-    route = evidence.get("route") or {}
-    parts = []
-    if not totals and not route:
-        return {
-            "summary": result.get("summary") or "周边工具未返回可用数据",
-            "evidence": evidence,
-            "source": "rules",
-        }
-    if route.get("summary"):
-        parts.append(f"通勤：{route.get('summary')}")
-    focus_labels = focus_group_labels((state.get("route") or {}).get("slots", {}).get("nearbyFocus"))
-    for label in focus_labels:
-        item = totals.get(label) or {}
-        nearest = item.get("nearest")
-        if nearest:
-            parts.append(f"{label}：{item.get('count', 0)} 个点位，最近 {nearest.get('name')} 约 {nearest.get('distance')} 米")
-        else:
-            parts.append(f"{label}：周边 {item.get('count', 0)} 个点位")
-    if highlights:
-        parts.append("重点关注：" + "；".join(highlights[:3]))
-    summary = "；".join(parts) if parts else (result.get("summary") or "暂无可分析的周边数据")
+    if not llm_text:
+        raise RuntimeError("模型没有生成周边生活分析")
     return {
-        "summary": summary,
+        "summary": llm_text,
         "evidence": evidence,
-        "source": "rules",
+        "source": "llm",
     }
 
 
@@ -812,7 +750,7 @@ def llm_map_life_analysis(state: TenantAgentState, evidence: dict[str, Any]) -> 
     api_key = os.getenv("AI_LLM_API_KEY", "")
     model = os.getenv("AI_LLM_MODEL", "")
     if not base_url or not api_key or not model:
-        return None
+        raise RuntimeError("AI_LLM_BASE_URL、AI_LLM_API_KEY 或 AI_LLM_MODEL 未配置，无法调用模型分析周边生活")
     return refine_with_langchain(
         base_url=base_url,
         api_key=api_key,
@@ -925,11 +863,13 @@ def synthesis(state: TenantAgentState) -> TenantAgentState:
     elif intent == "knowledge_answer":
         answer = "我先查了统一知识库：\n" + ((state.get("analysis") or {}).get("summary") or "暂无命中。")
     else:
-        if intent == "house_recommend":
+        if has_expert_result(state, "map_life_specialist") and not has_expert_result(state, "house_search_specialist"):
+            answer = synthesize_nearby_answer(state)
+        elif intent == "house_recommend":
             answer = synthesize_house_recommendation(state)
         elif intent == "contract_risk":
             answer = synthesize_contract_risk(state)
-        elif is_nearby_query(str(state.get("message") or "").lower()):
+        elif has_expert_result(state, "map_life_specialist"):
             answer = synthesize_nearby_answer(state)
         else:
             answer = synthesize_context_answer(state)
@@ -944,8 +884,10 @@ def synthesize_house_recommendation(state: TenantAgentState) -> str:
     matches = extract_house_matches(state)
     slots = (state.get("route") or {}).get("slots") or {}
     city = slots.get("city")
+    district = slots.get("district")
     max_rent = as_int(slots.get("maxRent"))
-    target = "、".join(str(item) for item in [city, f"{max_rent}元以内" if max_rent else None] if item)
+    place = " ".join(str(item) for item in [city, district] if item)
+    target = "、".join(str(item) for item in [place, f"{max_rent}元以内" if max_rent else None] if item)
     if not matches:
         return f"我查了{target or '当前条件'}，暂时没有查到符合条件的公开房源。"
 
@@ -1013,7 +955,7 @@ def synthesize_knowledge_answer(state: TenantAgentState) -> str:
 
 
 def synthesize_context_answer(state: TenantAgentState) -> str:
-    nearby = synthesize_nearby_answer(state) if is_nearby_query(str(state.get("message") or "").lower()) else ""
+    nearby = synthesize_nearby_answer(state) if has_expert_result(state, "map_life_specialist") else ""
     if nearby:
         return nearby
     record = first_tool_output(state, "summarize_business_record")
@@ -1028,17 +970,37 @@ def synthesize_context_answer(state: TenantAgentState) -> str:
     return "这次没有拿到可用于回答的业务结果。"
 
 
+def has_expert_result(state: TenantAgentState, name: str) -> bool:
+    return any(
+        expert.get("name") == name
+        for expert in (state.get("collaboration") or {}).get("experts", [])
+    )
+
+
 def extract_house_matches(state: TenantAgentState) -> list[dict[str, Any]]:
     matches = []
+    slots = (state.get("route") or {}).get("slots") or {}
     for call in state.get("tool_calls", []):
         if call.get("name") not in {"search_houses", "search_public_houses"}:
             continue
         output = call.get("output") or {}
         for key in ["matches", "rows", "items"]:
             for item in output.get(key) or []:
-                if isinstance(item, dict):
+                if isinstance(item, dict) and house_matches_slots(item, slots):
                     matches.append(item)
     return matches
+
+
+def house_matches_slots(item: dict[str, Any], slots: dict[str, Any]) -> bool:
+    city = str(slots.get("city") or "").strip()
+    district = str(slots.get("district") or "").strip()
+    item_city = str(item.get("city") or "")
+    item_district = str(item.get("district") or "")
+    if city and city not in item_city and city.removesuffix("市") not in item_city:
+        return False
+    if district and district not in item_district and district.removesuffix("区") not in item_district:
+        return False
+    return True
 
 
 def first_tool_output(state: TenantAgentState, name: str) -> dict[str, Any]:
@@ -1108,17 +1070,24 @@ def tool_call(name: str, label: str, output: dict[str, Any]) -> dict[str, Any]:
 
 def collect_house_ids(state: TenantAgentState) -> list[int]:
     ids: list[int] = []
+    slots = (state.get("route") or {}).get("slots") or {}
     selected = (state.get("context") or {}).get("selected") or {}
-    house_id = as_int(selected.get("houseId"))
-    if house_id:
-        ids.append(house_id)
+    selected_house_id = as_int(selected.get("houseId"))
+    if selected_house_id and (state.get("route") or {}).get("intent") != "house_recommend":
+        ids.append(selected_house_id)
     for call in state.get("tool_calls", []):
         output = call.get("output") or {}
         for key in ["matches", "rows", "items"]:
             for item in output.get(key) or []:
+                if not isinstance(item, dict) or not house_matches_slots(item, slots):
+                    continue
                 item_id = as_int(item.get("houseId"))
                 if item_id:
                     ids.append(item_id)
+    if ids:
+        return list(dict.fromkeys(ids))
+    if selected_house_id and not slots.get("city") and not slots.get("district"):
+        ids.append(selected_house_id)
     return list(dict.fromkeys(ids))
 
 

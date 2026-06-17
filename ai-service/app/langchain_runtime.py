@@ -93,7 +93,7 @@ def invoke_structured_json(
     timeout: int = 8,
 ) -> dict[str, Any] | None:
     if not langchain_available():
-        return None
+        raise RuntimeError(f"LangChain 不可用，无法调用模型输出结构化 JSON：{LANGCHAIN_IMPORT_ERROR}")
 
     llm = ChatOpenAI(
         model=model,
@@ -110,7 +110,7 @@ def invoke_structured_json(
             for item in content
         )
     if not content:
-        return None
+        raise RuntimeError("模型没有返回结构化 JSON 内容")
     text = str(content).strip()
     if text.startswith("```"):
         text = text.strip("`")
@@ -118,9 +118,11 @@ def invoke_structured_json(
             text = text[4:].strip()
     try:
         data = json.loads(text)
-        return data if isinstance(data, dict) else None
+        if not isinstance(data, dict):
+            raise RuntimeError(f"模型结构化 JSON 顶层不是对象：{text[:300]}")
+        return data
     except json.JSONDecodeError:
-        return None
+        raise RuntimeError(f"模型返回不是有效 JSON：{text[:300]}")
 
 
 def _make_tool_adapter(
